@@ -35,8 +35,10 @@ assets = { directory = ".open-next/assets", binding = "ASSETS" }
 # Central translated to UTC (morning ~07:00, midday ~13:00, check ~16:00,
 # evening ~20:00 CT); they drift ~1h across DST until per-user local scheduling
 # lands. Keep in sync with custom-worker.ts CRON_SLOT and scheduling.ts.
+# Daily slots + the Sunday-evening weekly review ("0 1 * * 1" = Mon 01:00 UTC =
+# Sun 8pm CT; custom-worker.ts routes it to /api/coomander/weekly-review).
 [triggers]
-crons = ["0 12 * * *", "0 18 * * *", "0 21 * * *", "0 1 * * *"]
+crons = ["0 12 * * *", "0 18 * * *", "0 21 * * *", "0 1 * * *", "0 1 * * 1"]
 
 # Plain env vars (non-secret). Secrets go through `wrangler secret put`.
 [vars]
