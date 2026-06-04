@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
+import { AppNav } from "@/components/app-nav";
 
 export const metadata: Metadata = {
-  title: "Dashboard",
-  description: "Your MaddieHQ dashboard.",
+  title: "Coomander",
+  description: "Coomander — your AI operations manager.",
   robots: { index: false, follow: false },
 };
 
@@ -11,5 +12,10 @@ export default function AppLayout({
 }: {
   children: React.ReactNode;
 }) {
-  return children;
+  return (
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+      <AppNav />
+      {children}
+    </div>
+  );
 }

@@ -95,7 +95,7 @@ async function chatIdFor(userId: string): Promise<string | null> {
 }
 
 /** Days since the user's ops account was seeded (drives the Day 1-6 ramp). */
-async function daysSinceStart(userId: string, today: string): Promise<number> {
+export async function daysSinceStart(userId: string, today: string): Promise<number> {
   const db = getDb();
   const rows = (await db.select({ seeded: settingsT.ops_seeded_at }).from(settingsT).where(eq(settingsT.user_id, userId)).limit(1)) as Array<{ seeded: number | null }>;
   const seeded = rows[0]?.seeded;

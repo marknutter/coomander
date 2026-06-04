@@ -4,15 +4,13 @@ import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
 import Link from "next/link";
-import { Sprout, LogOut, Star, ExternalLink, Lock, Settings, Sun, Moon, Monitor, MessageSquare, Sparkles, ArrowRight } from "lucide-react";
-import { NotificationBell } from "@/components/notification-bell";
+import { Sprout, LogOut, Star, ExternalLink, Lock, Settings, Sun, Moon, Monitor, MessageSquare, Sparkles, ArrowRight, ListChecks } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Alert } from "@/components/ui/alert";
 import { Modal } from "@/components/ui/modal";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { toast } from "@/lib/use-toast";
 import { commandRegistry } from "@/lib/commands";
 import { Onboarding } from "@/components/onboarding";
@@ -224,7 +222,6 @@ export default function AppPage() {
   const [plan, setPlan] = useState<string>("free");
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [upgradeBannerDismissed, setUpgradeBannerDismissed] = useState(false);
-  const [portalLoading, setPortalLoading] = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
   const [verifiedBanner, setVerifiedBanner] = useState(false);
   const [insightsState, setInsightsState] = useState<InsightsState>({ kind: "loading" });
@@ -299,11 +296,35 @@ export default function AppPage() {
     const commands = [
       {
         id: "nav-dashboard",
-        label: "Dashboard",
+        label: "Home",
         category: "Navigation",
         icon: <Sprout className="w-4 h-4" />,
-        keywords: ["home", "main"],
+        keywords: ["home", "main", "dashboard"],
         action: () => router.push("/app"),
+      },
+      {
+        id: "nav-cadence",
+        label: "Cadence",
+        category: "Navigation",
+        icon: <ListChecks className="w-4 h-4" />,
+        keywords: ["coomander", "ops", "plan", "beats", "pillars"],
+        action: () => router.push("/app/cadence"),
+      },
+      {
+        id: "nav-insights",
+        label: "Insights",
+        category: "Navigation",
+        icon: <Sparkles className="w-4 h-4" />,
+        keywords: ["analytics", "instagram", "reports"],
+        action: () => router.push("/app/insights"),
+      },
+      {
+        id: "nav-coomander-chat",
+        label: "Chat with Coomander",
+        category: "Navigation",
+        icon: <MessageSquare className="w-4 h-4" />,
+        keywords: ["coomander", "agent", "assistant", "chat"],
+        action: () => router.push("/app/chat"),
       },
       {
         id: "nav-settings",
@@ -382,26 +403,6 @@ export default function AppPage() {
     }
   }, [loadPlanStatus]);
 
-  const handleLogout = async () => {
-    await authClient.signOut();
-    router.push("/auth");
-  };
-
-  const handleManageSubscription = async () => {
-    setPortalLoading(true);
-    try {
-      const res = await fetch("/api/stripe/portal");
-      if (res.ok) {
-        const data = await res.json();
-        if (data.url) window.location.href = data.url;
-      }
-    } catch {
-      toast.error("Could not open subscription portal");
-    } finally {
-      setPortalLoading(false);
-    }
-  };
-
   if (authLoading) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
@@ -411,7 +412,7 @@ export default function AppPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+    <>
       {/* Onboarding for new users */}
       <Onboarding plan={isPro ? "pro" : "free"} />
 
@@ -424,56 +425,6 @@ export default function AppPage() {
       >
         <UpgradeModalContent onDismiss={() => setShowUpgradeModal(false)} />
       </Modal>
-
-      {/* Header */}
-      <header className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-10">
-        <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Sprout className="w-6 h-6 text-primary" />
-            <span className="font-bold text-gray-900 dark:text-gray-100">MaddieHQ</span>
-          </div>
-          <div className="flex items-center gap-4">
-            <span className="text-xs text-gray-500 dark:text-gray-400 hidden sm:block">{userEmail}</span>
-            {isPro && (
-              <Badge variant="pro" icon={<Star className="w-3 h-3" />}>
-                Pro
-              </Badge>
-            )}
-            {isPro && (
-              <button
-                onClick={handleManageSubscription}
-                disabled={portalLoading}
-                className="text-xs text-gray-400 dark:text-gray-500 hover:text-primary/80 underline transition-colors hidden sm:block"
-              >
-                {portalLoading ? "Loading\u2026" : "Manage subscription"}
-              </button>
-            )}
-            <button
-              onClick={() => router.push("/app/chat")}
-              className="text-gray-400 hover:text-primary/80 transition-colors"
-              title="AI Chat"
-            >
-              <MessageSquare className="w-4 h-4" />
-            </button>
-            <NotificationBell />
-            <ThemeToggle compact />
-            <button
-              onClick={() => router.push("/settings")}
-              className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
-              title="Settings"
-            >
-              <Settings className="w-4 h-4" />
-            </button>
-            <button
-              onClick={handleLogout}
-              className="text-gray-400 hover:text-red-500 dark:hover:text-red-400 transition-colors"
-              title="Sign out"
-            >
-              <LogOut className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-      </header>
 
       <main className="max-w-4xl mx-auto px-4 py-6 space-y-6">
         {/* Email verified banner */}
@@ -561,6 +512,6 @@ export default function AppPage() {
         {/* Bottom padding */}
         <div className="pb-8" />
       </main>
-    </div>
+    </>
   );
 }
