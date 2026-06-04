@@ -532,3 +532,109 @@ export type NewCoomanderDayState = typeof coomanderDayState.$inferInsert;
 
 export type CoomanderDedup = typeof coomanderDedup.$inferSelect;
 export type NewCoomanderDedup = typeof coomanderDedup.$inferInsert;
+
+// ─── Coomander ops domain model (#152) ───────────────────────────────────────
+// OF-only creator-economy primitives. See migrations/017_coomander_domain.sql.
+
+export const cadencePillars = sqliteTable("cadence_pillars", {
+  id: text("id").primaryKey(),
+  user_id: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  kind: text("kind").$type<"content" | "wall" | "procurement" | "engagement" | "admin">().notNull(),
+  display_order: integer("display_order").notNull().default(0),
+  archived_at: integer("archived_at"),
+  created_at: integer("created_at").notNull().default(sql`(unixepoch())`),
+  updated_at: integer("updated_at").notNull().default(sql`(unixepoch())`),
+}, (table) => [
+  index("idx_cadence_pillars_user_id").on(table.user_id),
+]);
+
+export const cadenceBeats = sqliteTable("cadence_beats", {
+  id: text("id").primaryKey(),
+  user_id: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  pillar_id: text("pillar_id").notNull().references(() => cadencePillars.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  cadence_kind: text("cadence_kind").$type<"daily" | "weekly" | "window" | "daily_vlog_buffer">().notNull(),
+  target_count: integer("target_count").notNull().default(1),
+  buffer_goal_days: integer("buffer_goal_days"),
+  window_start: text("window_start"),
+  window_end: text("window_end"),
+  priority: text("priority").$type<"low" | "med" | "high">().notNull().default("med"),
+  platform_specific: text("platform_specific").$type<"ig" | "tiktok" | "fb" | "snap" | "of" | null>(),
+  subtype: text("subtype"),
+  active: integer("active").notNull().default(1),
+  archived_at: integer("archived_at"),
+  notes: text("notes"),
+  created_at: integer("created_at").notNull().default(sql`(unixepoch())`),
+  updated_at: integer("updated_at").notNull().default(sql`(unixepoch())`),
+}, (table) => [
+  index("idx_cadence_beats_user_id").on(table.user_id),
+  index("idx_cadence_beats_pillar_id").on(table.pillar_id),
+]);
+
+export type ContentStateValue =
+  | "drafted" | "shot" | "approved" | "uploaded_to_edit" | "edited" | "scheduled" | "shipped";
+
+export const contentStates = sqliteTable("content_states", {
+  id: text("id").primaryKey(),
+  user_id: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  beat_id: text("beat_id").references(() => cadenceBeats.id, { onDelete: "set null" }),
+  title: text("title").notNull(),
+  current_state: text("current_state").$type<ContentStateValue>().notNull().default("drafted"),
+  state_history_json: text("state_history_json").notNull().default("[]"),
+  drive_url: text("drive_url"),
+  edited_url: text("edited_url"),
+  notes: text("notes"),
+  created_at: integer("created_at").notNull().default(sql`(unixepoch())`),
+  updated_at: integer("updated_at").notNull().default(sql`(unixepoch())`),
+}, (table) => [
+  index("idx_content_states_user_id").on(table.user_id),
+  index("idx_content_states_user_state").on(table.user_id, table.current_state),
+  index("idx_content_states_beat_id").on(table.beat_id),
+]);
+
+export const drops = sqliteTable("drops", {
+  id: text("id").primaryKey(),
+  user_id: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  beat_id: text("beat_id").notNull().references(() => cadenceBeats.id, { onDelete: "cascade" }),
+  kind: text("kind").$type<"shipped" | "purchased" | "completed" | "captured">().notNull(),
+  source: text("source").$type<"auto_ig" | "auto_of" | "telegram" | "manual_ui">().notNull(),
+  platform: text("platform").$type<"ig" | "tiktok" | "fb" | "snap" | "of" | null>(),
+  external_ref: text("external_ref"),
+  content_state_id: text("content_state_id").references(() => contentStates.id, { onDelete: "set null" }),
+  payload_json: text("payload_json").notNull().default("{}"),
+  dropped_at: integer("dropped_at").notNull().default(sql`(unixepoch())`),
+  created_at: integer("created_at").notNull().default(sql`(unixepoch())`),
+}, (table) => [
+  index("idx_drops_user_id").on(table.user_id),
+  index("idx_drops_user_beat_dropped").on(table.user_id, table.beat_id, table.dropped_at),
+]);
+
+export const procurementItems = sqliteTable("procurement_items", {
+  id: text("id").primaryKey(),
+  user_id: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  beat_id: text("beat_id").references(() => cadenceBeats.id, { onDelete: "set null" }),
+  category: text("category").$type<"shoot_prep" | "business_admin">().notNull(),
+  label: text("label").notNull(),
+  status: text("status").$type<"needed" | "ordered" | "received" | "canceled">().notNull().default("needed"),
+  needed_by: text("needed_by"),
+  estimated_cost_cents: integer("estimated_cost_cents"),
+  actual_cost_cents: integer("actual_cost_cents"),
+  notes: text("notes"),
+  created_at: integer("created_at").notNull().default(sql`(unixepoch())`),
+  updated_at: integer("updated_at").notNull().default(sql`(unixepoch())`),
+}, (table) => [
+  index("idx_procurement_user_id").on(table.user_id),
+  index("idx_procurement_user_category").on(table.user_id, table.category),
+]);
+
+export type CadencePillar = typeof cadencePillars.$inferSelect;
+export type NewCadencePillar = typeof cadencePillars.$inferInsert;
+export type CadenceBeat = typeof cadenceBeats.$inferSelect;
+export type NewCadenceBeat = typeof cadenceBeats.$inferInsert;
+export type ContentState = typeof contentStates.$inferSelect;
+export type NewContentState = typeof contentStates.$inferInsert;
+export type Drop = typeof drops.$inferSelect;
+export type NewDrop = typeof drops.$inferInsert;
+export type ProcurementItem = typeof procurementItems.$inferSelect;
+export type NewProcurementItem = typeof procurementItems.$inferInsert;

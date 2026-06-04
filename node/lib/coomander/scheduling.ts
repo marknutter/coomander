@@ -68,6 +68,25 @@ export async function getDayState(userId: string, date: string): Promise<DayStat
   return rows[0] ?? null;
 }
 
+/** Set the day's quality (e.g. 'bad' from a mark_blocker). Upserts the row. */
+export async function setDayQuality(
+  userId: string,
+  date: string,
+  quality: "good" | "bad" | null,
+): Promise<void> {
+  const db = getDb();
+  const existing = (await db
+    .select({ id: dayT.id })
+    .from(dayT)
+    .where(and(eq(dayT.user_id, userId), eq(dayT.date, date)))
+    .limit(1)) as Array<{ id: string }>;
+  if (existing[0]) {
+    await db.update(dayT).set({ day_quality: quality }).where(eq(dayT.id, existing[0].id));
+  } else {
+    await db.insert(dayT).values({ id: newId(), user_id: userId, date, day_quality: quality });
+  }
+}
+
 /** Stamp a slot as delivered for the user's day (upserts the row). */
 export async function markSlotSent(userId: string, slot: Slot, date: string): Promise<void> {
   const db = getDb();
