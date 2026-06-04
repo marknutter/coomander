@@ -53,6 +53,11 @@ export const coomanderMessageLog = mod.coomanderMessageLog;
 export const coomanderUsage = mod.coomanderUsage;
 export const coomanderDayState = mod.coomanderDayState;
 export const coomanderDedup = mod.coomanderDedup;
+export const cadencePillars = mod.cadencePillars;
+export const cadenceBeats = mod.cadenceBeats;
+export const contentStates = mod.contentStates;
+export const drops = mod.drops;
+export const procurementItems = mod.procurementItems;
 
 export type {
   Platform,
@@ -79,4 +84,15 @@ export type {
   NewCoomanderDayState,
   CoomanderDedup,
   NewCoomanderDedup,
+  ContentStateValue,
+  CadencePillar,
+  NewCadencePillar,
+  CadenceBeat,
+  NewCadenceBeat,
+  ContentState,
+  NewContentState,
+  Drop,
+  NewDrop,
+  ProcurementItem,
+  NewProcurementItem,
 } from "./schema.sqlite";
