@@ -48,6 +48,11 @@ export const postInsights = mod.postInsights;
 export const accountSnapshots = mod.accountSnapshots;
 export const demographics = mod.demographics;
 export const contentInsights = mod.contentInsights;
+export const coomanderSettings = mod.coomanderSettings;
+export const coomanderMessageLog = mod.coomanderMessageLog;
+export const coomanderUsage = mod.coomanderUsage;
+export const coomanderDayState = mod.coomanderDayState;
+export const coomanderDedup = mod.coomanderDedup;
 
 export type {
   Platform,
@@ -64,4 +69,14 @@ export type {
   NewDemographic,
   ContentInsight,
   NewContentInsight,
+  CoomanderSettings,
+  NewCoomanderSettings,
+  CoomanderMessageLog,
+  NewCoomanderMessageLog,
+  CoomanderUsage,
+  NewCoomanderUsage,
+  CoomanderDayState,
+  NewCoomanderDayState,
+  CoomanderDedup,
+  NewCoomanderDedup,
 } from "./schema.sqlite";

@@ -30,6 +30,9 @@ export const user = pgTable("user", {
   subscriptionStatus: text("subscriptionStatus").default("inactive"),
   isAdmin: integer("isAdmin").notNull().default(0),
   disabled: integer("disabled").notNull().default(0),
+  // Coomander (#151): Telegram destination + opt-in flag for the ops agent.
+  telegramChatId: text("telegramChatId"),
+  coomanderEnabled: integer("coomanderEnabled").notNull().default(0),
 });
 
 export const session = pgTable("session", {
@@ -426,3 +429,62 @@ export const contentInsights = pgTable("content_insights", {
 }, (table) => [
   index("idx_content_insights_user_id").on(table.user_id),
 ]);
+
+// ─── Coomander — AI ops agent infrastructure (#151) ──────────────────────────
+// Mirrors schema.sqlite.ts. See migrations/016_coomander_infra.sql.
+
+export const coomanderSettings = pgTable("coomander_settings", {
+  user_id: text("user_id").primaryKey().references(() => user.id, { onDelete: "cascade" }),
+  nag_frequency: text("nag_frequency").notNull().default("tight"),
+  persona_mode: text("persona_mode").notNull().default("light_companion"),
+  ping_times_json: text("ping_times_json"),
+  companion_consent_at: integer("companion_consent_at"),
+  created_at: integer("created_at").notNull().default(sql`extract(epoch from now())::integer`),
+  updated_at: integer("updated_at").notNull().default(sql`extract(epoch from now())::integer`),
+});
+
+// RETENTION POLICY: NO TTL, NO deletion sweep, EVER. Long-term companion-memory
+// substrate. Deletion is a manual operator action only, never code.
+export const coomanderMessageLog = pgTable("coomander_message_log", {
+  id: text("id").primaryKey(),
+  user_id: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  direction: text("direction").notNull(),
+  telegram_update_id: integer("telegram_update_id"),
+  text: text("text").notNull(),
+  tool_call_json: text("tool_call_json"),
+  persona_mode: text("persona_mode").notNull().default("light_companion"),
+  created_at: integer("created_at").notNull().default(sql`extract(epoch from now())::integer`),
+}, (table) => [
+  index("idx_coomander_message_log_user_created").on(table.user_id, table.created_at),
+]);
+
+export const coomanderUsage = pgTable("coomander_usage", {
+  id: text("id").primaryKey(),
+  user_id: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  slot_or_inbound: text("slot_or_inbound").notNull(),
+  input_tokens: integer("input_tokens").notNull().default(0),
+  output_tokens: integer("output_tokens").notNull().default(0),
+  model: text("model").notNull(),
+  created_at: integer("created_at").notNull().default(sql`extract(epoch from now())::integer`),
+}, (table) => [
+  index("idx_coomander_usage_user_id").on(table.user_id),
+]);
+
+export const coomanderDayState = pgTable("coomander_day_state", {
+  id: text("id").primaryKey(),
+  user_id: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  date: text("date").notNull(),
+  morning_ping_sent_at: integer("morning_ping_sent_at"),
+  midday_ping_sent_at: integer("midday_ping_sent_at"),
+  evening_recap_at: integer("evening_recap_at"),
+  day_quality: text("day_quality"),
+}, (table) => [
+  uniqueIndex("coomander_day_state_user_date_unique").on(table.user_id, table.date),
+  index("idx_coomander_day_state_user_id").on(table.user_id),
+]);
+
+export const coomanderDedup = pgTable("coomander_dedup", {
+  telegram_update_id: integer("telegram_update_id").primaryKey(),
+  user_id: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  processed_at: integer("processed_at").notNull().default(sql`extract(epoch from now())::integer`),
+});

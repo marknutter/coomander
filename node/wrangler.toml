@@ -4,7 +4,9 @@
 # with values from `wrangler d1 create` / `wrangler r2 bucket create`.
 
 name = "maddiehq"
-main = ".open-next/worker.js"
+# Custom Worker entrypoint (#151): wraps .open-next/worker.js to add the
+# Coomander cron `scheduled()` handler. See custom-worker.ts.
+main = "custom-worker.ts"
 
 # Custom domain — Cloudflare provisions the cert on deploy.
 # Requires oqodo.com to be on this Cloudflare account.
@@ -20,6 +22,21 @@ compatibility_flags = ["nodejs_compat"]
 
 # Static assets emitted by `opennextjs-cloudflare build`.
 assets = { directory = ".open-next/assets", binding = "ASSETS" }
+
+# ── Coomander cron (#151) ──────────────────────────────────────────────────
+# IMPORTANT (§9.4 gotcha): this [triggers] table — like every other [table]
+# header below — MUST stay BELOW all top-level scalars (name, main,
+# compatibility_*, assets, routes). A table header placed above them silently
+# absorbs the scalars that follow it. Validate with `wrangler deploy --dry-run`.
+#
+# Tight-preset cadence (UTC). custom-worker.ts maps each cron expression to a
+# slot; the run route fans out to opted-in users and applies each user's nag
+# preset (planPing) internally. Times are the tight-preset local intent for US
+# Central translated to UTC (morning ~07:00, midday ~13:00, check ~16:00,
+# evening ~20:00 CT); they drift ~1h across DST until per-user local scheduling
+# lands. Keep in sync with custom-worker.ts CRON_SLOT and scheduling.ts.
+[triggers]
+crons = ["0 12 * * *", "0 18 * * *", "0 21 * * *", "0 1 * * *"]
 
 # Plain env vars (non-secret). Secrets go through `wrangler secret put`.
 [vars]
