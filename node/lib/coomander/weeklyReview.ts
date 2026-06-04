@@ -315,6 +315,6 @@ export function renderReviewMessage(review: WeeklyReview, appUrl: string): strin
   if (review.highlights[0]) lines.push(`Win: ${review.highlights[0]}`);
   if (review.drift[0]) lines.push(`Drift: ${review.drift[0]}`);
   if (review.next_week_focus) lines.push(`Next week: ${review.next_week_focus}`);
-  lines.push(`Full review: ${appUrl}/app/coomander/review/${review.week_ending}`);
+  lines.push(`Full review: ${appUrl}/app/cadence/review/${review.week_ending}`);
   return lines.join("\n\n");
 }

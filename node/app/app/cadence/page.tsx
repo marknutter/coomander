@@ -1,7 +1,9 @@
 "use client";
 
 /**
- * /app/coomander — Coomander ops dashboard (#152).
+ * /app/cadence — Cadence ops dashboard (#152). The AI agent that drives this
+ * state is "Coomander" (lib/coomander, /api/coomander); the user-facing surface
+ * is "Cadence".
  *
  * Internal-tools-grade (no marketing polish). Shows the TodayModel — pillars
  * with beats + status, the content pipeline, urgent procurement split by
@@ -126,7 +128,7 @@ export default function CoomanderPage() {
       </div>
 
       <div className="flex items-baseline justify-between">
-        <h1 className="text-2xl font-semibold text-gray-900 dark:text-gray-100">Coomander</h1>
+        <h1 className="text-2xl font-semibold text-gray-900 dark:text-gray-100">Cadence</h1>
         {model && (
           <div className="text-sm text-gray-600 dark:text-gray-300">
             {model.date} · <span className={overallClass}>{model.overall_state.toUpperCase()}</span>
@@ -159,7 +161,7 @@ export default function CoomanderPage() {
             </div>
           )}
           {latestReviewWeek && (
-            <Link href={`/app/coomander/review/${latestReviewWeek}`} className="block text-sm text-blue-700 dark:text-blue-300 hover:underline">
+            <Link href={`/app/cadence/review/${latestReviewWeek}`} className="block text-sm text-blue-700 dark:text-blue-300 hover:underline">
               View latest weekly review ({latestReviewWeek}) →
             </Link>
           )}

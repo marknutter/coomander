@@ -127,21 +127,21 @@ function formatRelative(iso: string): string {
   return `${days}d ago`;
 }
 
-// ─── Coomander Card ───────────────────────────────────────────────────────────
-function CoomanderCard() {
+// ─── Cadence Card ─────────────────────────────────────────────────────────────
+function CadenceCard() {
   return (
-    <Card title="Coomander" headerAction={<MessageSquare className="w-4 h-4 text-primary" />}>
+    <Card title="Cadence" headerAction={<MessageSquare className="w-4 h-4 text-primary" />}>
       <p className="text-sm text-gray-600 dark:text-gray-300 mb-4">
-        Your AI operations manager. Coomander keeps you on cadence across reels, wall
-        content, lives, and PPV, and pings you on Telegram to stay on track. Reply in
-        plain language and it logs what you shipped, flags blockers, and tracks
-        procurement for you.
+        Your content plan across reels, wall content, lives, and PPV, managed by
+        Coomander. Coomander pings you on Telegram to keep you on track, and you can
+        reply in plain language to log what you shipped, flag blockers, and track
+        procurement. Open Cadence to see and adjust your pillars and beats.
       </p>
       <Link
-        href="/app/coomander"
+        href="/app/cadence"
         className="inline-flex items-center gap-2 bg-primary text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-primary/90 transition-colors"
       >
-        Open Coomander
+        Open Cadence
         <ArrowRight className="w-4 h-4" />
       </Link>
     </Card>
@@ -518,8 +518,8 @@ export default function AppPage() {
           </p>
         </Card>
 
-        {/* Coomander — AI ops manager (primary feature) */}
-        <CoomanderCard />
+        {/* Cadence — the content plan Coomander manages (primary feature) */}
+        <CadenceCard />
 
         {/* Pro-gated feature example */}
         <Card
