@@ -10,6 +10,7 @@ import {
   createBeat, listBeats, updateBeat, deleteBeat,
   type CadenceKind, type Platform, type BeatPriority,
 } from "@/lib/coomander/beats";
+import { updateCoomanderSettings } from "@/lib/coomander/settings";
 import { UnauthorizedError, BadRequestError, NotFoundError, errorResponse } from "@/lib/errors";
 import { log } from "@/lib/logger";
 
@@ -94,6 +95,8 @@ export async function PATCH(request: Request) {
       archived: typeof b.archived === "boolean" ? b.archived : undefined,
     });
     if (!beat) throw new NotFoundError("beat not found");
+    // First edit to a beat dismisses the v1-defaults disclaimer banner (#153).
+    await updateCoomanderSettings(userId, { dismissBanner: true }).catch(() => {});
     return NextResponse.json({ beat });
   } catch (error) {
     log.error("PATCH /api/coomander/beats failed", { error });

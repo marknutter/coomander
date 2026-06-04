@@ -21,6 +21,7 @@ import { logDrop, type DropKind } from "./drops";
 import { updateBeat } from "./beats";
 import { listProcurement, createProcurement, updateProcurement, type ProcurementCategory } from "./procurement";
 import { setDayQuality, todayUTC } from "./scheduling";
+import { checkWallProhibitions } from "./wallProhibitions";
 import type { PersonaMode } from "./settings";
 import type { ContentStateValue, CadenceBeat, ContentState, ProcurementItem } from "@/lib/schema";
 
@@ -265,7 +266,13 @@ async function executeAction(userId: string, action: ResolvedAction, ctx: Inboun
         platform: (action.platform as never) ?? beat.platform_specific ?? null,
         payload: action.notes ? { notes: action.notes } : undefined,
       });
-      return { reply: `Logged. Counted toward ${beat.name}.`, acted: true };
+      // Soft wall-content prohibition warnings on a capture (#153).
+      let warn = "";
+      if (action.dropKind === "captured") {
+        const ws = checkWallProhibitions(action.notes);
+        if (ws.length) warn = " " + ws.map((w) => w.message).join(" ");
+      }
+      return { reply: `Logged. Counted toward ${beat.name}.${warn}`, acted: true };
     }
     case "advance": {
       const res = await transitionContent(userId, action.contentId, action.newState, action.notes ?? null);

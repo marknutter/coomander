@@ -31,6 +31,8 @@ export interface CoomanderSettingsResolved {
   personaMode: PersonaMode;
   pingTimesJson: string | null;
   companionConsentAt: number | null;
+  opsSeededAt: number | null;
+  defaultsBannerDismissedAt: number | null;
 }
 
 // ── Pure pickers (no DB) ─────────────────────────────────────────────────────
@@ -41,6 +43,8 @@ type SettingsRow =
       persona_mode?: string | null;
       ping_times_json?: string | null;
       companion_consent_at?: number | null;
+      ops_seeded_at?: number | null;
+      defaults_banner_dismissed_at?: number | null;
     }
   | undefined;
 
@@ -79,6 +83,8 @@ export async function getCoomanderSettings(userId: string): Promise<CoomanderSet
     personaMode: pickPersonaMode(row),
     pingTimesJson: row?.ping_times_json ?? null,
     companionConsentAt: row?.companion_consent_at ?? null,
+    opsSeededAt: row?.ops_seeded_at ?? null,
+    defaultsBannerDismissedAt: row?.defaults_banner_dismissed_at ?? null,
   };
 }
 
@@ -112,6 +118,8 @@ export interface SettingsPatch {
   nagFrequency?: NagFrequency;
   personaMode?: PersonaMode;
   pingTimesJson?: string | null;
+  /** When true, stamp defaults_banner_dismissed_at = now. */
+  dismissBanner?: boolean;
 }
 
 /** Upsert a user's Coomander settings. Only provided fields change. */
@@ -128,6 +136,7 @@ export async function updateCoomanderSettings(
     if (patch.nagFrequency !== undefined) set.nag_frequency = patch.nagFrequency;
     if (patch.personaMode !== undefined) set.persona_mode = patch.personaMode;
     if (patch.pingTimesJson !== undefined) set.ping_times_json = patch.pingTimesJson;
+    if (patch.dismissBanner) set.defaults_banner_dismissed_at = now;
     await db.update(settingsT).set(set).where(eq(settingsT.user_id, userId));
   } else {
     await db.insert(settingsT).values({
@@ -135,6 +144,7 @@ export async function updateCoomanderSettings(
       nag_frequency: patch.nagFrequency ?? DEFAULT_NAG_FREQUENCY,
       persona_mode: patch.personaMode ?? DEFAULT_PERSONA_MODE,
       ping_times_json: patch.pingTimesJson ?? null,
+      defaults_banner_dismissed_at: patch.dismissBanner ? now : null,
       created_at: now,
       updated_at: now,
     });

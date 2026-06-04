@@ -7,6 +7,8 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { logDrop, listDrops, type DropKind } from "@/lib/coomander/drops";
 import type { Platform } from "@/lib/coomander/beats";
+import { checkWallProhibitions } from "@/lib/coomander/wallProhibitions";
+import { appendMessage } from "@/lib/coomander/coomanderMessages";
 import { UnauthorizedError, BadRequestError, errorResponse } from "@/lib/errors";
 import { log } from "@/lib/logger";
 
@@ -46,15 +48,26 @@ export async function POST(request: Request) {
     if (typeof b.beatId !== "string") throw new BadRequestError("beatId is required");
     if (!KINDS.includes(b.kind as DropKind)) throw new BadRequestError(`kind must be one of: ${KINDS.join(", ")}`);
     if (b.platform != null && !PLATFORMS.includes(b.platform as Platform)) throw new BadRequestError("invalid platform");
+    const notes = typeof b.notes === "string" ? b.notes : undefined;
     const drop = await logDrop(userId, {
       beatId: b.beatId,
       kind: b.kind as DropKind,
       source: "manual_ui",
       platform: (b.platform as Platform | null | undefined) ?? null,
       contentStateId: typeof b.contentStateId === "string" ? b.contentStateId : null,
-      payload: typeof b.payload === "object" && b.payload ? (b.payload as Record<string, unknown>) : undefined,
+      payload: notes ? { notes } : (typeof b.payload === "object" && b.payload ? (b.payload as Record<string, unknown>) : undefined),
     });
-    return NextResponse.json({ drop }, { status: 201 });
+
+    // OF wall-content prohibition checks (#153): soft warnings on a wall capture.
+    // Not blockers — the drop is already recorded; the creator can override.
+    let warnings: { code: string; message: string }[] = [];
+    if (b.kind === "captured" && notes) {
+      warnings = checkWallProhibitions(notes);
+      for (const w of warnings) {
+        await appendMessage(userId, "outbound", `Wall warning (${w.code}): ${w.message}`, {}).catch(() => {});
+      }
+    }
+    return NextResponse.json({ drop, warnings }, { status: 201 });
   } catch (error) {
     log.error("POST /api/coomander/drops failed", { error });
     return errorResponse(error);
