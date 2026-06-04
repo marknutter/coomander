@@ -71,13 +71,24 @@ export default function CoomanderPage() {
   const [content, setContent] = useState<ContentItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [bannerDismissed, setBannerDismissed] = useState(true);
+  const [enabling, setEnabling] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
       setError(null);
-      const [t, c] = await Promise.all([api("GET", "/api/coomander/today"), api("GET", "/api/coomander/content")]);
+      const en = await api("GET", "/api/coomander/enable");
+      setEnabled(en.enabled as boolean);
+      if (!en.enabled) { setLoading(false); return; }
+      const [t, c, s] = await Promise.all([
+        api("GET", "/api/coomander/today"),
+        api("GET", "/api/coomander/content"),
+        api("GET", "/api/coomander/settings"),
+      ]);
       setModel(t.model as TodayModel);
       setContent((c.content as ContentItem[]) ?? []);
+      setBannerDismissed(((s.settings as { defaultsBannerDismissedAt: number | null }).defaultsBannerDismissedAt) != null);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -86,6 +97,17 @@ export default function CoomanderPage() {
   }, []);
 
   useEffect(() => { refresh(); }, [refresh]);
+
+  const enableOps = async () => {
+    setEnabling(true);
+    try { await api("POST", "/api/coomander/enable"); toast.success("Coomander enabled, defaults seeded"); await refresh(); }
+    catch (e) { toast.error((e as Error).message); } finally { setEnabling(false); }
+  };
+
+  const dismissBanner = async () => {
+    setBannerDismissed(true);
+    try { await api("PATCH", "/api/coomander/settings", { dismissBanner: true }); } catch { /* best effort */ }
+  };
 
   const overallClass =
     model?.overall_state === "green" ? "text-green-600" : model?.overall_state === "red" ? "text-red-600" : "text-amber-600";
@@ -113,8 +135,25 @@ export default function CoomanderPage() {
       {error && <div className="text-sm text-red-900 bg-red-100 rounded p-3">{error}</div>}
       {loading && <Skeleton className="h-40 w-full" />}
 
+      {enabled === false && !loading && (
+        <Card title="Enable Coomander">
+          <p className="text-sm text-gray-600 dark:text-gray-300 mb-3">
+            Turn on Coomander to seed the validated OF playbook (reels, trials, wall, lives, PPV, procurement) and start daily accountability pings.
+          </p>
+          <Button onClick={enableOps} disabled={enabling}>{enabling ? "Enabling…" : "Enable Coomander"}</Button>
+        </Card>
+      )}
+
       {model && (
         <>
+          {!bannerDismissed && (
+            <div className="flex items-start gap-3 text-sm bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900 rounded p-3 text-blue-900 dark:text-blue-100">
+              <span className="flex-1">
+                These cadence defaults match the OF playbook our research validated. They&apos;re meant to be edited if your workflow differs. Tap any beat to adjust targets or remove it.
+              </span>
+              <button onClick={dismissBanner} aria-label="Dismiss" className="text-blue-700 dark:text-blue-300 hover:opacity-70">×</button>
+            </div>
+          )}
           {/* Pillars + beats */}
           <Card title="Cadence">
             {model.pillars.length === 0 && <p className="text-sm text-gray-500">No pillars yet. Add one below.</p>}
@@ -167,6 +206,10 @@ export default function CoomanderPage() {
 function BeatRow({ b, onChange }: { b: TodayBeat; onChange: () => void }) {
   const [target, setTarget] = useState(String(b.beat.target_count));
   const [saving, setSaving] = useState(false);
+  const [captureNote, setCaptureNote] = useState("");
+  const [warnings, setWarnings] = useState<string[]>([]);
+  const isBuffer = b.beat.cadence_kind === "daily_vlog_buffer";
+
   const save = async () => {
     setSaving(true);
     try {
@@ -175,22 +218,47 @@ function BeatRow({ b, onChange }: { b: TodayBeat; onChange: () => void }) {
       onChange();
     } catch (e) { toast.error((e as Error).message); } finally { setSaving(false); }
   };
+
+  const capture = async () => {
+    try {
+      const r = await api("POST", "/api/coomander/drops", { beatId: b.beat.id, kind: "captured", platform: b.beat.platform_specific ?? undefined, notes: captureNote || undefined });
+      const ws = ((r.warnings as Array<{ message: string }>) ?? []).map((w) => w.message);
+      setWarnings(ws);
+      setCaptureNote("");
+      if (ws.length) toast.error(`${ws.length} wall warning(s)`); else toast.success("Captured");
+      onChange();
+    } catch (e) { toast.error((e as Error).message); }
+  };
+
   return (
-    <div className="flex items-center gap-2 text-sm">
-      <span className={`px-2 py-0.5 rounded text-xs ${STATUS_CLASS[b.status] ?? "bg-gray-100 text-gray-700"}`}>{b.status}</span>
-      <span className="text-gray-900 dark:text-gray-100">{b.beat.name}</span>
-      <span className="text-xs text-gray-400">{b.beat.cadence_kind}{b.beat.platform_specific ? `·${b.beat.platform_specific}` : ""}{b.beat.subtype ? `·${b.beat.subtype}` : ""}</span>
-      {b.buffer_status ? (
-        <span className="text-xs text-gray-500">buffer {b.buffer_status.current_days}/{b.buffer_status.goal_days}d</span>
-      ) : b.window_progress ? (
-        <span className="text-xs text-gray-500">{Math.round(b.window_progress.completion * 100)}% · {b.window_progress.days_remaining}d left</span>
-      ) : (
-        <span className="text-xs text-gray-500">{b.actual_today}/{b.expected_today} today{b.streak_days ? ` · ${b.streak_days}d streak` : ""}</span>
+    <div className="text-sm">
+      <div className="flex items-center gap-2">
+        <span className={`px-2 py-0.5 rounded text-xs ${STATUS_CLASS[b.status] ?? "bg-gray-100 text-gray-700"}`}>{b.status}</span>
+        <span className="text-gray-900 dark:text-gray-100">{b.beat.name}</span>
+        <span className="text-xs text-gray-400">{b.beat.cadence_kind}{b.beat.platform_specific ? `·${b.beat.platform_specific}` : ""}{b.beat.subtype ? `·${b.beat.subtype}` : ""}</span>
+        {b.buffer_status ? (
+          <span className="text-xs text-gray-500">buffer {b.buffer_status.current_days}/{b.buffer_status.goal_days}d</span>
+        ) : b.window_progress ? (
+          <span className="text-xs text-gray-500">{Math.round(b.window_progress.completion * 100)}% · {b.window_progress.days_remaining}d left</span>
+        ) : (
+          <span className="text-xs text-gray-500">{b.actual_today}/{b.expected_today} today{b.streak_days ? ` · ${b.streak_days}d streak` : ""}</span>
+        )}
+        <span className="ml-auto flex items-center gap-1">
+          <Input value={target} onChange={(e) => setTarget(e.target.value)} className="w-16 text-gray-900 dark:text-gray-100" />
+          <Button size="sm" variant="secondary" onClick={save} disabled={saving}>Set</Button>
+        </span>
+      </div>
+      {isBuffer && (
+        <div className="mt-1 ml-6 flex items-center gap-1">
+          <Input placeholder="Log a wall capture (note)…" value={captureNote} onChange={(e) => setCaptureNote(e.target.value)} className="text-gray-900 dark:text-gray-100" />
+          <Button size="sm" variant="secondary" onClick={capture}>Capture</Button>
+        </div>
       )}
-      <span className="ml-auto flex items-center gap-1">
-        <Input value={target} onChange={(e) => setTarget(e.target.value)} className="w-16 text-gray-900 dark:text-gray-100" />
-        <Button size="sm" variant="secondary" onClick={save} disabled={saving}>Set</Button>
-      </span>
+      {warnings.length > 0 && (
+        <div className="mt-1 ml-6 space-y-0.5">
+          {warnings.map((w, i) => <div key={i} className="text-xs text-amber-700 bg-amber-50 dark:bg-amber-950/40 rounded px-2 py-1">⚠ {w}</div>)}
+        </div>
+      )}
     </div>
   );
 }
