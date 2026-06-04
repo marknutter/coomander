@@ -127,6 +127,27 @@ function formatRelative(iso: string): string {
   return `${days}d ago`;
 }
 
+// ─── Coomander Card ───────────────────────────────────────────────────────────
+function CoomanderCard() {
+  return (
+    <Card title="Coomander" headerAction={<MessageSquare className="w-4 h-4 text-primary" />}>
+      <p className="text-sm text-gray-600 dark:text-gray-300 mb-4">
+        Your AI operations manager. Coomander keeps you on cadence across reels, wall
+        content, lives, and PPV, and pings you on Telegram to stay on track. Reply in
+        plain language and it logs what you shipped, flags blockers, and tracks
+        procurement for you.
+      </p>
+      <Link
+        href="/app/coomander"
+        className="inline-flex items-center gap-2 bg-primary text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-primary/90 transition-colors"
+      >
+        Open Coomander
+        <ArrowRight className="w-4 h-4" />
+      </Link>
+    </Card>
+  );
+}
+
 // ─── Upgrade Modal ────────────────────────────────────────────────────────────
 function UpgradeModalContent({ onDismiss }: { onDismiss: () => void }) {
   const [loading, setLoading] = useState(false);
@@ -496,6 +517,9 @@ export default function AppPage() {
             )}
           </p>
         </Card>
+
+        {/* Coomander — AI ops manager (primary feature) */}
+        <CoomanderCard />
 
         {/* Pro-gated feature example */}
         <Card
