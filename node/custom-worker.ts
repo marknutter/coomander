@@ -33,22 +33,32 @@ const CRON_SLOT = {
   "0 1 * * *": "evening",
 };
 
+// Sunday 8pm CT (Monday 01:00 UTC) — the weekly review. Note this overlaps the
+// daily evening cron on Mondays; Cloudflare fires each expression separately, so
+// both run and event.cron distinguishes them.
+const WEEKLY_REVIEW_CRON = "0 1 * * 1";
+
+async function post(path, env, ctx, payload) {
+  const req = new Request(`https://maddiehq.oqodo.com${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-agent-secret": env.COOMANDER_RUN_SECRET ?? "" },
+    body: JSON.stringify(payload),
+  });
+  return handler.fetch(req, env, ctx);
+}
+
 const worker = {
   fetch: handler.fetch,
 
   async scheduled(event, env, ctx) {
+    if (event.cron === WEEKLY_REVIEW_CRON) {
+      const res = await post("/api/coomander/weekly-review", env, ctx, {});
+      console.log(`[cron] coomander weekly-review cron="${event.cron}" -> ${res.status} ${await res.text().catch(() => "")}`);
+      return;
+    }
     const slot = CRON_SLOT[event.cron] ?? "check";
-    const req = new Request("https://maddiehq.oqodo.com/api/coomander/run", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-agent-secret": env.COOMANDER_RUN_SECRET ?? "",
-      },
-      body: JSON.stringify({ slot }),
-    });
-    const res = await handler.fetch(req, env, ctx);
-    const body = await res.text().catch(() => "");
-    console.log(`[cron] coomander cron="${event.cron}" slot="${slot}" -> ${res.status} ${body}`);
+    const res = await post("/api/coomander/run", env, ctx, { slot });
+    console.log(`[cron] coomander cron="${event.cron}" slot="${slot}" -> ${res.status} ${await res.text().catch(() => "")}`);
   },
 };
 

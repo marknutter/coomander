@@ -643,3 +643,20 @@ export type Drop = typeof drops.$inferSelect;
 export type NewDrop = typeof drops.$inferInsert;
 export type ProcurementItem = typeof procurementItems.$inferSelect;
 export type NewProcurementItem = typeof procurementItems.$inferInsert;
+
+// ─── Coomander weekly review (#154) ──────────────────────────────────────────
+export const weeklyReviews = sqliteTable("weekly_reviews", {
+  id: text("id").primaryKey(),
+  user_id: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  week_ending: text("week_ending").notNull(),
+  review_json: text("review_json").notNull(),
+  telegram_message_id: integer("telegram_message_id"),
+  drift_question_message_ids_json: text("drift_question_message_ids_json").notNull().default("[]"),
+  created_at: integer("created_at").notNull().default(sql`(unixepoch())`),
+}, (table) => [
+  uniqueIndex("weekly_reviews_user_week_unique").on(table.user_id, table.week_ending),
+  index("idx_weekly_reviews_user_id").on(table.user_id),
+]);
+
+export type WeeklyReviewRow = typeof weeklyReviews.$inferSelect;
+export type NewWeeklyReviewRow = typeof weeklyReviews.$inferInsert;

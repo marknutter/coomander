@@ -74,6 +74,7 @@ export default function CoomanderPage() {
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [bannerDismissed, setBannerDismissed] = useState(true);
   const [enabling, setEnabling] = useState(false);
+  const [latestReviewWeek, setLatestReviewWeek] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -81,14 +82,17 @@ export default function CoomanderPage() {
       const en = await api("GET", "/api/coomander/enable");
       setEnabled(en.enabled as boolean);
       if (!en.enabled) { setLoading(false); return; }
-      const [t, c, s] = await Promise.all([
+      const [t, c, s, lr] = await Promise.all([
         api("GET", "/api/coomander/today"),
         api("GET", "/api/coomander/content"),
         api("GET", "/api/coomander/settings"),
+        api("GET", "/api/coomander/weekly-review/latest").catch(() => ({ review: null })),
       ]);
       setModel(t.model as TodayModel);
       setContent((c.content as ContentItem[]) ?? []);
       setBannerDismissed(((s.settings as { defaultsBannerDismissedAt: number | null }).defaultsBannerDismissedAt) != null);
+      const rev = lr.review as { week_ending: string } | null;
+      setLatestReviewWeek(rev?.week_ending ?? null);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -154,6 +158,12 @@ export default function CoomanderPage() {
               <button onClick={dismissBanner} aria-label="Dismiss" className="text-blue-700 dark:text-blue-300 hover:opacity-70">×</button>
             </div>
           )}
+          {latestReviewWeek && (
+            <Link href={`/app/coomander/review/${latestReviewWeek}`} className="block text-sm text-blue-700 dark:text-blue-300 hover:underline">
+              View latest weekly review ({latestReviewWeek}) →
+            </Link>
+          )}
+
           {/* Pillars + beats */}
           <Card title="Cadence">
             {model.pillars.length === 0 && <p className="text-sm text-gray-500">No pillars yet. Add one below.</p>}

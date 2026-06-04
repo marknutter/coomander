@@ -58,6 +58,7 @@ export const cadenceBeats = mod.cadenceBeats;
 export const contentStates = mod.contentStates;
 export const drops = mod.drops;
 export const procurementItems = mod.procurementItems;
+export const weeklyReviews = mod.weeklyReviews;
 
 export type {
   Platform,
@@ -95,4 +96,6 @@ export type {
   NewDrop,
   ProcurementItem,
   NewProcurementItem,
+  WeeklyReviewRow,
+  NewWeeklyReviewRow,
 } from "./schema.sqlite";
