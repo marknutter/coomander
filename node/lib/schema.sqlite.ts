@@ -29,6 +29,9 @@ export const user = sqliteTable("user", {
   subscriptionStatus: text("subscriptionStatus").default("inactive"),
   isAdmin: integer("isAdmin").notNull().default(0),
   disabled: integer("disabled").notNull().default(0),
+  // Coomander (#151): Telegram destination + opt-in flag for the ops agent.
+  telegramChatId: text("telegramChatId"),
+  coomanderEnabled: integer("coomanderEnabled").notNull().default(0),
 });
 
 export const session = sqliteTable("session", {
@@ -449,3 +452,83 @@ export type NewDemographic = typeof demographics.$inferInsert;
 
 export type ContentInsight = typeof contentInsights.$inferSelect;
 export type NewContentInsight = typeof contentInsights.$inferInsert;
+
+// ─── Coomander — AI ops agent infrastructure (#151) ──────────────────────────
+// Pure infra port from ~/Code/geology. Domain model is #152. All tables are
+// user_id-scoped. See migrations/016_coomander_infra.sql and
+// docs/strategy/coomander-direction.md.
+
+export const coomanderSettings = sqliteTable("coomander_settings", {
+  user_id: text("user_id").primaryKey().references(() => user.id, { onDelete: "cascade" }),
+  // tight (default) | moderate | light — see coomander-direction.md § Nag frequency
+  nag_frequency: text("nag_frequency").notNull().default("tight"),
+  // light_companion (default) | full_companion | operational
+  persona_mode: text("persona_mode").notNull().default("light_companion"),
+  ping_times_json: text("ping_times_json"),
+  companion_consent_at: integer("companion_consent_at"),
+  created_at: integer("created_at").notNull().default(sql`(unixepoch())`),
+  updated_at: integer("updated_at").notNull().default(sql`(unixepoch())`),
+});
+
+// RETENTION POLICY: NO TTL, NO deletion sweep, EVER. This is the long-term
+// companion-memory substrate — full-companion persona depends on an indefinite
+// log of the creator's conversational history. Any deletion is a manual
+// operator action (user request / GDPR), never code.
+export const coomanderMessageLog = sqliteTable("coomander_message_log", {
+  id: text("id").primaryKey(),
+  user_id: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  direction: text("direction").notNull(), // 'inbound' | 'outbound'
+  telegram_update_id: integer("telegram_update_id"),
+  text: text("text").notNull(),
+  tool_call_json: text("tool_call_json"),
+  persona_mode: text("persona_mode").notNull().default("light_companion"),
+  created_at: integer("created_at").notNull().default(sql`(unixepoch())`),
+}, (table) => [
+  index("idx_coomander_message_log_user_created").on(table.user_id, table.created_at),
+]);
+
+export const coomanderUsage = sqliteTable("coomander_usage", {
+  id: text("id").primaryKey(),
+  user_id: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  slot_or_inbound: text("slot_or_inbound").notNull(),
+  input_tokens: integer("input_tokens").notNull().default(0),
+  output_tokens: integer("output_tokens").notNull().default(0),
+  model: text("model").notNull(),
+  created_at: integer("created_at").notNull().default(sql`(unixepoch())`),
+}, (table) => [
+  index("idx_coomander_usage_user_id").on(table.user_id),
+]);
+
+export const coomanderDayState = sqliteTable("coomander_day_state", {
+  id: text("id").primaryKey(),
+  user_id: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  date: text("date").notNull(), // YYYY-MM-DD in the user's local tz
+  morning_ping_sent_at: integer("morning_ping_sent_at"),
+  midday_ping_sent_at: integer("midday_ping_sent_at"),
+  evening_recap_at: integer("evening_recap_at"),
+  day_quality: text("day_quality"), // 'good' | 'bad' | null
+}, (table) => [
+  uniqueIndex("coomander_day_state_user_date_unique").on(table.user_id, table.date),
+  index("idx_coomander_day_state_user_id").on(table.user_id),
+]);
+
+export const coomanderDedup = sqliteTable("coomander_dedup", {
+  telegram_update_id: integer("telegram_update_id").primaryKey(),
+  user_id: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  processed_at: integer("processed_at").notNull().default(sql`(unixepoch())`),
+});
+
+export type CoomanderSettings = typeof coomanderSettings.$inferSelect;
+export type NewCoomanderSettings = typeof coomanderSettings.$inferInsert;
+
+export type CoomanderMessageLog = typeof coomanderMessageLog.$inferSelect;
+export type NewCoomanderMessageLog = typeof coomanderMessageLog.$inferInsert;
+
+export type CoomanderUsage = typeof coomanderUsage.$inferSelect;
+export type NewCoomanderUsage = typeof coomanderUsage.$inferInsert;
+
+export type CoomanderDayState = typeof coomanderDayState.$inferSelect;
+export type NewCoomanderDayState = typeof coomanderDayState.$inferInsert;
+
+export type CoomanderDedup = typeof coomanderDedup.$inferSelect;
+export type NewCoomanderDedup = typeof coomanderDedup.$inferInsert;

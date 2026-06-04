@@ -4,7 +4,9 @@
 # with values from `wrangler d1 create` / `wrangler r2 bucket create`.
 
 name = "maddiehq"
-main = ".open-next/worker.js"
+# Custom Worker entrypoint (#151): wraps .open-next/worker.js to add the
+# Coomander cron `scheduled()` handler. See custom-worker.ts.
+main = "custom-worker.ts"
 
 # Custom domain — Cloudflare provisions the cert on deploy.
 # Requires oqodo.com to be on this Cloudflare account.
@@ -20,6 +22,19 @@ compatibility_flags = ["nodejs_compat"]
 
 # Static assets emitted by `opennextjs-cloudflare build`.
 assets = { directory = ".open-next/assets", binding = "ASSETS" }
+
+# ── Coomander cron (#151) ──────────────────────────────────────────────────
+# IMPORTANT (§9.4 gotcha): this [triggers] table — like every other [table]
+# header below — MUST stay BELOW all top-level scalars (name, main,
+# compatibility_*, assets, routes). A table header placed above them silently
+# absorbs the scalars that follow it. Validate with `wrangler deploy --dry-run`.
+#
+# MILESTONE 1: a single fast test cron (every 10 min) for rapid iteration. The
+# scheduled() handler in custom-worker.ts maps the trigger to a POST
+# /api/coomander/run. Lower to the real tight-preset cadence (morning/midday/
+# evening, UTC-translated) once planPing decision logic lands.
+[triggers]
+crons = ["*/10 * * * *"]
 
 # Plain env vars (non-secret). Secrets go through `wrangler secret put`.
 [vars]
