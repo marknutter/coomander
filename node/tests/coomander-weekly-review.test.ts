@@ -417,6 +417,6 @@ describe("renderReviewMessage", () => {
     expect(msg).toContain("cushion");
     expect(msg).toContain(WEEK_ENDING);
     expect(msg).toContain(appUrl);
-    expect(msg).toContain(`${appUrl}/app/coomander/review/${WEEK_ENDING}`);
+    expect(msg).toContain(`${appUrl}/app/cadence/review/${WEEK_ENDING}`);
   });
 });

@@ -59,6 +59,11 @@ export async function PATCH(request: Request) {
       }
       patch.pingTimesJson = body.pingTimesJson as string | null;
     }
+    // Stamps defaults_banner_dismissed_at — used by onboarding (#173) as the
+    // "creator confirmed their starter cadence defaults" signal.
+    if (body.dismissBanner === true) {
+      patch.dismissBanner = true;
+    }
 
     if (Object.keys(patch).length === 0) {
       throw new BadRequestError("no valid fields to update");

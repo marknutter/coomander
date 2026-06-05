@@ -60,7 +60,7 @@ export interface InboundContext {
 
 // ── Anthropic tool definitions ────────────────────────────────────────────────
 
-function tools(): Anthropic.Tool[] {
+export function tools(): Anthropic.Tool[] {
   return [
     {
       name: TOOLS.LOG_DROP,
@@ -253,7 +253,7 @@ export function resolveToolUse(toolName: string, input: Record<string, unknown>,
 
 // ── Execution (DB writes) ──────────────────────────────────────────────────────
 
-async function executeAction(userId: string, action: ResolvedAction, ctx: InboundContext): Promise<{ reply: string; acted: boolean }> {
+export async function executeAction(userId: string, action: ResolvedAction, ctx: InboundContext): Promise<{ reply: string; acted: boolean }> {
   switch (action.kind) {
     case "clarify":
       return { reply: action.reply, acted: false };
