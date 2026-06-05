@@ -1,99 +1,113 @@
 "use client";
 
+/**
+ * In-app Coomander chat (#169, epic #168).
+ *
+ * The real Coomander agent in the browser — NOT the generic template bot. It
+ * renders the unified `coomander_message_log` thread (the SAME thread as
+ * Telegram, so web + phone are one continuous conversation), posts turns to
+ * `POST /api/coomander/chat` (Coomander converses OR takes a domain action,
+ * grounded in the live TodayModel), and shows an "enable Coomander" prompt
+ * instead of a dead chat when ops isn't on yet.
+ *
+ * One assistant, not two: this replaces the old `/app/chat` template chatbot.
+ */
+
 import { useState, useEffect, useRef, useCallback, Suspense } from "react";
-import { useRouter } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import {
-  MessageSquare, Plus, Send, Mic, MicOff, Paperclip, X,
-  Play, Pause, Loader2, FileText, ImageIcon,
+  Bot, Send, Mic, MicOff, Loader2, Sparkles, CheckCircle2,
 } from "lucide-react";
 import { ChatMessageContent } from "@/components/chat-message";
 import { useVoice } from "@/lib/use-voice";
-import { stripTags } from "@/lib/chat-tags";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
+import { toast } from "@/lib/use-toast";
 
 interface Message {
   id: string;
   role: "user" | "assistant";
   content: string;
-  attachments_meta?: string | null;
+  createdAt?: number;
+  /** Local-only marker: this turn took a domain action (logged a drop, etc.). */
+  acted?: boolean;
 }
 
-interface Conversation {
-  id: string;
-  title: string;
-  updated_at: string;
-}
+const POLL_INTERVAL_MS = 12_000;
+const SUGGESTIONS = [
+  "What should I focus on today?",
+  "What's my content cushion?",
+  "Posted the gym reel",
+];
 
-interface PendingFile {
-  name: string;
-  type: string;
-  size: number;
-  data: string; // base64
-}
-
-const PLAYBACK_RATES = [1, 1.25, 1.5, 2];
-const MAX_FILE_SIZE = 10 * 1024 * 1024;
-const ACCEPTED_TYPES = ".pdf,.csv,.txt,.png,.jpg,.jpeg,.gif,.webp,.docx,.doc,.xlsx,.xls,.pptx,.ppt";
-
-function formatTime(s: number): string {
-  const m = Math.floor(s / 60);
-  const sec = Math.floor(s % 60);
-  return `${m}:${sec.toString().padStart(2, "0")}`;
-}
-
-function ChatPage() {
-  const router = useRouter();
-  const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [activeConvId, setActiveConvId] = useState<string | null>(null);
+function CoomanderChat() {
+  const searchParams = useSearchParams();
+  const [loading, setLoading] = useState(true);
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [enabling, setEnabling] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
-  const [streaming, setStreaming] = useState(false);
-  const [streamingText, setStreamingText] = useState("");
-  const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
+  const [sending, setSending] = useState(false);
   const [audioEnabled, setAudioEnabled] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const sendingRef = useRef(false);
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, []);
 
-  // Voice
-  const {
-    voiceState, currentTranscript, toggleListening, speak,
-    isSupported: isVoiceSupported, audioRef, playback,
-    togglePlayback, seekTo, setPlaybackRate,
-  } = useVoice({
-    onTurnEnd: (transcript) => {
-      setInput(transcript);
-      // Auto-send after voice input
-      setTimeout(() => handleSend(transcript), 100);
-    },
-    onError: (err) => console.error("[Voice]", err),
-  });
-
-  // Load conversations
-  useEffect(() => {
-    fetch("/api/conversations").then(r => r.json()).then(data => {
-      setConversations(data.conversations || []);
-    }).catch(() => {});
+  // Hydrate the unified thread (oldest-first) + ops-enabled state.
+  const loadThread = useCallback(async () => {
+    const res = await fetch("/api/coomander/chat");
+    if (!res.ok) throw new Error(`thread load failed: ${res.status}`);
+    const data = (await res.json()) as {
+      enabled: boolean;
+      messages: Array<{ id: string; role: "user" | "assistant"; content: string; createdAt: number }>;
+    };
+    setEnabled(data.enabled);
+    setMessages(data.messages ?? []);
   }, []);
 
-  // Load messages when conversation changes
   useEffect(() => {
-    if (!activeConvId) { setMessages([]); return; }
-    fetch(`/api/conversations/${activeConvId}/messages`)
-      .then(r => r.json())
-      .then(data => { setMessages(data.messages || []); setTimeout(scrollToBottom, 100); })
-      .catch(() => {});
-  }, [activeConvId, scrollToBottom]);
+    loadThread()
+      .catch((err) => {
+        console.error("[Coomander chat]", err);
+        toast.error("Couldn't load your Coomander thread.");
+      })
+      .finally(() => {
+        setLoading(false);
+        setTimeout(scrollToBottom, 100);
+      });
+  }, [loadThread, scrollToBottom]);
 
-  // Auto-scroll on new messages
-  useEffect(() => { scrollToBottom(); }, [messages, streamingText, scrollToBottom]);
+  // Light polling so a message sent on Telegram appears here without a manual
+  // refresh (and vice versa). Skipped while a turn is in flight to avoid
+  // clobbering the optimistic user bubble.
+  useEffect(() => {
+    if (!enabled) return;
+    const t = setInterval(() => {
+      if (sendingRef.current) return;
+      fetch("/api/coomander/chat")
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (!data?.messages) return;
+          setMessages((prev) => {
+            // Only adopt the server thread if it has new rows we don't show yet.
+            if (data.messages.length === prev.length) return prev;
+            return data.messages as Message[];
+          });
+        })
+        .catch(() => {});
+    }, POLL_INTERVAL_MS);
+    return () => clearInterval(t);
+  }, [enabled]);
 
-  // Auto-resize textarea
+  // Auto-scroll on new messages.
+  useEffect(() => { scrollToBottom(); }, [messages, sending, scrollToBottom]);
+
+  // Auto-resize the textarea.
   useEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
@@ -101,322 +115,276 @@ function ChatPage() {
     }
   }, [input]);
 
-  async function createConversation(): Promise<string> {
-    const res = await fetch("/api/conversations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
-    const data = await res.json();
-    const conv = data.conversation;
-    setConversations(prev => [conv, ...prev]);
-    setActiveConvId(conv.id);
-    return conv.id;
-  }
+  // Voice: speak transcripts as turns; optionally read replies aloud. Declared
+  // before handleSend; `onTurnEnd` calls the hoisted handleSend below.
+  const {
+    voiceState, currentTranscript, toggleListening, speak,
+    isSupported: isVoiceSupported, audioRef,
+  } = useVoice({
+    onTurnEnd: (transcript) => { void handleSend(transcript); },
+    onError: (err) => console.error("[Voice]", err),
+  });
 
-  async function saveMessage(convId: string, role: "user" | "assistant", content: string, attachments_meta?: PendingFile[]) {
-    const res = await fetch(`/api/conversations/${convId}/messages`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ role, content, attachments_meta: attachments_meta?.map(f => ({ name: f.name, type: f.type, size: f.size })) }),
-    });
-    const data = await res.json();
-    return data.message;
-  }
-
+  // Hoisted function declaration so useVoice (above) and the seed effect (below)
+  // can both reference it without a temporal-dead-zone problem.
   async function handleSend(overrideText?: string) {
-    const text = (overrideText || input).trim();
-    if (!text && pendingFiles.length === 0) return;
-    if (streaming) return;
+    const text = (overrideText ?? input).trim();
+    if (!text || sendingRef.current) return;
 
-    let convId = activeConvId;
-    if (!convId) convId = await createConversation();
-
-    // Save user message
-    const userMsg = await saveMessage(convId, "user", text, pendingFiles.length > 0 ? pendingFiles : undefined);
-    setMessages(prev => [...prev, userMsg]);
+    const optimistic: Message = { id: `local-${Date.now()}`, role: "user", content: text };
+    setMessages((prev) => [...prev, optimistic]);
     setInput("");
-
-    // Build message history for LLM
-    const history = [...messages, { id: userMsg.id, role: "user" as const, content: text }];
-    const llmMessages = history.map(m => ({
-      role: m.role,
-      content: m.content,
-      ...(m.id === userMsg.id && pendingFiles.length > 0 ? {
-        attachments: pendingFiles.map(f => ({ name: f.name, type: f.type, size: f.size, data: f.data }))
-      } : {}),
-    }));
-
-    setPendingFiles([]);
-    setStreaming(true);
-    setStreamingText("");
+    setSending(true);
+    sendingRef.current = true;
 
     try {
-      const res = await fetch("/api/chat", {
+      const res = await fetch("/api/coomander/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: llmMessages }),
+        body: JSON.stringify({ message: text }),
       });
+      if (!res.ok) throw new Error(`chat turn failed: ${res.status}`);
+      const data = (await res.json()) as { reply: string; acted: boolean };
 
-      if (!res.ok) throw new Error(`Chat failed: ${res.status}`);
+      setMessages((prev) => [
+        ...prev,
+        { id: `reply-${Date.now()}`, role: "assistant", content: data.reply, acted: data.acted },
+      ]);
 
-      const reader = res.body?.getReader();
-      if (!reader) throw new Error("No response body");
-
-      const decoder = new TextDecoder();
-      let fullText = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split("\n");
-
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          const jsonStr = line.slice(6);
-          try {
-            const event = JSON.parse(jsonStr);
-            if (event.text) {
-              fullText += event.text;
-              setStreamingText(stripTags(fullText));
-            }
-            if (event.done && event.fullText) {
-              fullText = event.fullText;
-            }
-          } catch {}
-        }
+      if (audioEnabled && data.reply) {
+        speak(data.reply).catch(() => {});
       }
-
-      // Save assistant message
-      const cleanText = stripTags(fullText);
-      const assistantMsg = await saveMessage(convId, "assistant", cleanText);
-      setMessages(prev => [...prev, assistantMsg]);
-      setStreamingText("");
-
-      // Speak response if audio enabled
-      if (audioEnabled && cleanText) {
-        speak(cleanText).catch(() => {});
-      }
-
-      // Refresh conversation list (title may have changed)
-      fetch("/api/conversations").then(r => r.json()).then(data => setConversations(data.conversations || [])).catch(() => {});
     } catch (err) {
-      console.error("[Chat]", err);
-      setStreamingText("");
+      console.error("[Coomander chat]", err);
+      toast.error("Coomander couldn't respond. Try again.");
+      // Roll back the optimistic user bubble so the thread stays truthful.
+      setMessages((prev) => prev.filter((m) => m.id !== optimistic.id));
+      setInput(text);
     } finally {
-      setStreaming(false);
+      setSending(false);
+      sendingRef.current = false;
     }
   }
 
-  function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
-    const files = e.target.files;
-    if (!files) return;
+  // Seed the composer from a ?q= deep-link (quick actions on the home page).
+  const seededRef = useRef(false);
+  useEffect(() => {
+    if (seededRef.current || loading || !enabled) return;
+    const q = searchParams.get("q");
+    if (q) {
+      seededRef.current = true;
+      void handleSend(q);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, enabled, searchParams]);
 
-    Array.from(files).forEach(file => {
-      if (file.size > MAX_FILE_SIZE) return;
-      const reader = new FileReader();
-      reader.onload = () => {
-        const base64 = (reader.result as string).split(",")[1];
-        setPendingFiles(prev => [...prev, { name: file.name, type: file.type, size: file.size, data: base64 }]);
-      };
-      reader.readAsDataURL(file);
-    });
-    e.target.value = "";
+  async function enableCoomander() {
+    setEnabling(true);
+    try {
+      const res = await fetch("/api/coomander/enable", { method: "POST" });
+      if (!res.ok) throw new Error(`enable failed: ${res.status}`);
+      await loadThread();
+      toast.success("Coomander is on. Say hi 👋");
+    } catch (err) {
+      console.error("[Coomander enable]", err);
+      toast.error("Couldn't enable Coomander. Try again.");
+    } finally {
+      setEnabling(false);
+    }
   }
 
-  const isDisabled = streaming || voiceState === "listening" || voiceState === "speaking";
+  // ── Loading ────────────────────────────────────────────────────────────────
+  if (loading) {
+    return (
+      <div className="max-w-2xl mx-auto px-4 py-10 space-y-4">
+        <Skeleton className="h-16 w-3/4" />
+        <Skeleton className="h-16 w-2/3 ml-auto" />
+        <Skeleton className="h-16 w-3/4" />
+      </div>
+    );
+  }
+
+  // ── Enable prompt (ops off) — not a dead chat ────────────────────────────────
+  if (enabled === false) {
+    return (
+      <div className="max-w-xl mx-auto px-4 py-16">
+        <div className="text-center">
+          <div className="flex items-center justify-center w-16 h-16 bg-accent rounded-2xl mx-auto mb-5">
+            <Bot className="w-8 h-8 text-primary" />
+          </div>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-2">
+            Meet Coomander
+          </h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400 leading-relaxed mb-6">
+            Coomander is your AI operations manager — it keeps your content cadence on
+            track, logs what you ship in plain language, and flags blockers before they
+            cost you. Turn it on to seed your starter playbook and start the conversation
+            (here and on Telegram — it&apos;s one thread).
+          </p>
+          <Button
+            variant="primary"
+            size="lg"
+            loading={enabling}
+            icon={<Sparkles className="w-4 h-4" />}
+            onClick={enableCoomander}
+          >
+            Enable Coomander
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── The chat ─────────────────────────────────────────────────────────────────
+  const isDisabled = sending || voiceState === "listening" || voiceState === "speaking";
 
   return (
-    <div className="flex h-screen bg-gray-50 dark:bg-gray-900">
-      {/* Sidebar */}
-      {sidebarOpen && (
-        <div className="w-64 border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 flex flex-col">
-          <div className="p-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Conversations</h2>
-            <button onClick={() => { setActiveConvId(null); setMessages([]); }} className="p-1 text-gray-400 hover:text-primary/80 transition-colors" title="New chat">
-              <Plus className="w-4 h-4" />
-            </button>
-          </div>
-          <div className="flex-1 overflow-y-auto">
-            {conversations.map(conv => (
-              <button key={conv.id} onClick={() => setActiveConvId(conv.id)}
-                className={`w-full text-left px-3 py-2 text-sm truncate transition-colors ${activeConvId === conv.id ? "bg-accent text-accent-foreground" : "text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50"}`}>
-                <MessageSquare className="w-3 h-3 inline mr-2 opacity-50" />
-                {conv.title}
-              </button>
-            ))}
-            {conversations.length === 0 && (
-              <p className="px-3 py-8 text-xs text-gray-400 dark:text-gray-500 text-center">No conversations yet</p>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Main chat area */}
-      <div className="flex-1 flex flex-col">
-        {/* Header */}
-        <header className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-4 py-2 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <button onClick={() => setSidebarOpen(!sidebarOpen)} className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
-              <MessageSquare className="w-4 h-4" />
-            </button>
-            <span className="text-sm font-medium text-gray-900 dark:text-gray-100">AI Chat</span>
-            {voiceState === "listening" && <span className="text-xs text-red-500 animate-pulse">Listening...</span>}
-            {voiceState === "processing" && <span className="text-xs text-yellow-500">Processing...</span>}
-            {voiceState === "speaking" && <span className="text-xs text-primary">Speaking...</span>}
-          </div>
-          <div className="flex items-center gap-2">
-            <label className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400 cursor-pointer">
-              <input type="checkbox" checked={audioEnabled} onChange={e => setAudioEnabled(e.target.checked)} className="rounded border-gray-300 dark:border-gray-600" />
-              Audio responses
-            </label>
-            <a href="/app" className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">Back to app</a>
-          </div>
-        </header>
-
-        {/* Messages */}
-        <div className="flex-1 overflow-y-auto px-4 py-6">
-          <div className="max-w-2xl mx-auto space-y-4">
-            {messages.length === 0 && !streaming && (
-              <div className="text-center py-20">
-                <MessageSquare className="w-10 h-10 text-gray-300 dark:text-gray-600 mx-auto mb-3" />
-                <p className="text-gray-500 dark:text-gray-400 font-medium">Start a conversation</p>
-                <p className="text-gray-400 dark:text-gray-500 text-xs mt-1">Type a message or tap the mic to speak</p>
-              </div>
-            )}
-
-            {messages.map(msg => (
-              <div key={msg.id} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-                <div className={`max-w-[80%] rounded-2xl px-4 py-2.5 ${msg.role === "user"
-                  ? "bg-primary text-white"
-                  : "bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100"}`}>
-                  <ChatMessageContent content={msg.content} role={msg.role} />
-                  {msg.attachments_meta && (
-                    <div className="flex flex-wrap gap-1 mt-1.5">
-                      {(JSON.parse(msg.attachments_meta) as Array<{name: string; type: string}>).map((att, i) => (
-                        <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gray-100 dark:bg-gray-700 text-xs text-gray-600 dark:text-gray-400">
-                          {att.type.startsWith("image/") ? <ImageIcon className="w-3 h-3" /> : <FileText className="w-3 h-3" />}
-                          {att.name.length > 20 ? att.name.slice(0, 17) + "..." : att.name}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))}
-
-            {/* Streaming message */}
-            {streaming && streamingText && (
-              <div className="flex justify-start">
-                <div className="max-w-[80%] rounded-2xl px-4 py-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100">
-                  <ChatMessageContent content={streamingText} role="assistant" />
-                  <span className="inline-block w-0.5 h-4 bg-primary animate-pulse ml-0.5" />
-                </div>
-              </div>
-            )}
-
-            {streaming && !streamingText && (
-              <div className="flex justify-start">
-                <div className="rounded-2xl px-4 py-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
-                  <Loader2 className="w-4 h-4 animate-spin text-gray-400" />
-                </div>
-              </div>
-            )}
-
-            {/* Live voice transcript */}
-            {voiceState === "listening" && currentTranscript && (
-              <div className="flex justify-end">
-                <div className="max-w-[80%] rounded-2xl px-4 py-2.5 border-2 border-dashed border-primary text-accent-foreground text-sm">
-                  {currentTranscript}
-                  <span className="inline-block w-0.5 h-3.5 bg-primary animate-pulse ml-0.5" />
-                </div>
-              </div>
-            )}
-
-            <div ref={messagesEndRef} />
-          </div>
-        </div>
-
-        {/* Audio playback */}
-        {playback.sourceUrl && (
-          <div className="mx-4 mb-2 max-w-2xl self-center w-full">
-            <div className="rounded-xl border border-accent bg-accent p-3">
-              <div className="flex items-center gap-3">
-                <button onClick={() => void togglePlayback()} className="p-1.5 text-primary hover:text-primary/80">
-                  {playback.isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-                </button>
-                <div className="flex-1">
-                  <input type="range" min={0} max={playback.duration || 0} value={playback.currentTime}
-                    onChange={e => seekTo(Number(e.target.value))} className="w-full h-1 accent-[hsl(var(--primary))]" />
-                  <div className="flex justify-between text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">
-                    <span>{formatTime(playback.currentTime)}</span>
-                    <span>{formatTime(playback.duration)}</span>
-                  </div>
-                </div>
-                <select value={playback.playbackRate} onChange={e => setPlaybackRate(Number(e.target.value))}
-                  className="text-xs border border-gray-200 dark:border-gray-600 rounded px-1 py-0.5 bg-transparent text-gray-600 dark:text-gray-400">
-                  {PLAYBACK_RATES.map(r => <option key={r} value={r}>{r}x</option>)}
-                </select>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Hidden audio element for TTS */}
-        <audio ref={audioRef} className="hidden" />
-
-        {/* Pending files */}
-        {pendingFiles.length > 0 && (
-          <div className="px-4 pb-2 max-w-2xl mx-auto w-full">
-            <div className="flex flex-wrap gap-1.5">
-              {pendingFiles.map((f, i) => (
-                <span key={i} className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-gray-100 dark:bg-gray-700 text-xs text-gray-600 dark:text-gray-400">
-                  {f.type.startsWith("image/") ? <ImageIcon className="w-3 h-3" /> : <FileText className="w-3 h-3" />}
-                  {f.name.length > 20 ? f.name.slice(0, 17) + "..." : f.name}
-                  <button onClick={() => setPendingFiles(prev => prev.filter((_, j) => j !== i))} className="ml-1 text-gray-400 hover:text-red-500">
-                    <X className="w-3 h-3" />
+    <div className="flex flex-col h-[calc(100dvh-3.5rem)]">
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto px-4 py-6">
+        <div className="max-w-2xl mx-auto space-y-4">
+          {messages.length === 0 && !sending && (
+            <div className="text-center py-16">
+              <Bot className="w-10 h-10 text-primary/70 mx-auto mb-3" />
+              <p className="text-gray-700 dark:text-gray-200 font-medium">
+                Coomander is ready.
+              </p>
+              <p className="text-gray-400 dark:text-gray-500 text-xs mt-1">
+                Ask what to work on, or tell it what you shipped.
+              </p>
+              <div className="flex flex-wrap justify-center gap-2 mt-5">
+                {SUGGESTIONS.map((s) => (
+                  <button
+                    key={s}
+                    onClick={() => void handleSend(s)}
+                    className="px-3 py-1.5 rounded-full border border-gray-200 dark:border-gray-700 text-xs text-gray-600 dark:text-gray-300 hover:border-primary hover:text-primary transition-colors"
+                  >
+                    {s}
                   </button>
-                </span>
-              ))}
+                ))}
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* Input area */}
-        <div className="border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-4 py-3">
-          <form onSubmit={e => { e.preventDefault(); handleSend(); }} className="max-w-2xl mx-auto flex items-end gap-2">
-            <input type="file" ref={fileInputRef} accept={ACCEPTED_TYPES} multiple onChange={handleFileSelect} className="hidden" />
-            <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isDisabled}
-              className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 disabled:opacity-50">
-              <Paperclip className="w-4 h-4" />
+          {messages.map((msg) => (
+            <div key={msg.id} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+              <div
+                className={`max-w-[80%] rounded-2xl px-4 py-2.5 ${
+                  msg.role === "user"
+                    ? "bg-primary text-white"
+                    : "bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100"
+                }`}
+              >
+                <ChatMessageContent content={msg.content} role={msg.role} />
+                {msg.acted && (
+                  <div className="flex items-center gap-1 mt-1.5 text-xs text-emerald-600 dark:text-emerald-400">
+                    <CheckCircle2 className="w-3 h-3" />
+                    <span>Logged to Cadence</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+
+          {/* Thinking indicator */}
+          {sending && (
+            <div className="flex justify-start">
+              <div className="rounded-2xl px-4 py-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
+                <Loader2 className="w-4 h-4 animate-spin text-gray-400" />
+              </div>
+            </div>
+          )}
+
+          {/* Live voice transcript */}
+          {voiceState === "listening" && currentTranscript && (
+            <div className="flex justify-end">
+              <div className="max-w-[80%] rounded-2xl px-4 py-2.5 border-2 border-dashed border-primary text-accent-foreground text-sm">
+                {currentTranscript}
+                <span className="inline-block w-0.5 h-3.5 bg-primary animate-pulse ml-0.5" />
+              </div>
+            </div>
+          )}
+
+          <div ref={messagesEndRef} />
+        </div>
+      </div>
+
+      {/* Hidden audio element for TTS */}
+      <audio ref={audioRef} className="hidden" />
+
+      {/* Composer */}
+      <div className="border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-4 py-3">
+        <form
+          onSubmit={(e) => { e.preventDefault(); void handleSend(); }}
+          className="max-w-2xl mx-auto flex items-end gap-2"
+        >
+          {isVoiceSupported && (
+            <button
+              type="button"
+              onClick={() => void toggleListening()}
+              disabled={sending || voiceState === "speaking"}
+              className={`p-2 rounded-lg transition-colors ${
+                voiceState === "listening"
+                  ? "bg-red-500 text-white animate-pulse"
+                  : "text-gray-400 hover:text-primary"
+              }`}
+              title={voiceState === "listening" ? "Stop" : "Speak"}
+            >
+              {voiceState === "listening" ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
             </button>
+          )}
 
-            {isVoiceSupported && (
-              <button type="button" onClick={() => void toggleListening()} disabled={streaming || voiceState === "speaking"}
-                className={`p-2 rounded-lg transition-colors ${voiceState === "listening" ? "bg-red-500 text-white animate-pulse" : voiceState === "speaking" ? "bg-primary text-white" : "text-gray-400 hover:text-primary/80 hover:bg-primary/90/20"}`}>
-                {voiceState === "listening" ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-              </button>
-            )}
+          <textarea
+            ref={textareaRef}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void handleSend(); } }}
+            placeholder={voiceState === "listening" ? "Listening…" : "Message Coomander…"}
+            disabled={isDisabled}
+            rows={1}
+            className="flex-1 resize-none border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-xl px-3 py-2 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50 max-h-[150px]"
+          />
 
-            <textarea ref={textareaRef} value={input} onChange={e => setInput(e.target.value)}
-              onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-              placeholder={voiceState === "listening" ? "Listening..." : "Type a message..."}
-              disabled={isDisabled} rows={1}
-              className="flex-1 resize-none border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-xl px-3 py-2 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50 max-h-[150px]" />
-
-            <button type="submit" disabled={isDisabled || (!input.trim() && pendingFiles.length === 0)}
-              className="p-2 text-white bg-primary hover:bg-primary/90 rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
-              <Send className="w-4 h-4" />
-            </button>
-          </form>
+          <button
+            type="submit"
+            disabled={isDisabled || !input.trim()}
+            className="p-2 text-white bg-primary hover:bg-primary/90 rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Send"
+          >
+            <Send className="w-4 h-4" />
+          </button>
+        </form>
+        <div className="max-w-2xl mx-auto mt-2 flex items-center justify-between">
+          <p className="text-[11px] text-gray-400 dark:text-gray-500">
+            One thread across web &amp; Telegram.
+          </p>
+          {isVoiceSupported && (
+            <label className="flex items-center gap-1.5 text-[11px] text-gray-400 dark:text-gray-500 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={audioEnabled}
+                onChange={(e) => setAudioEnabled(e.target.checked)}
+                className="rounded border-gray-300 dark:border-gray-600"
+              />
+              Read replies aloud
+            </label>
+          )}
         </div>
       </div>
     </div>
   );
 }
 
-export default function ChatPageWrapper() {
+export default function CoomanderChatPage() {
   return (
-    <Suspense fallback={<div className="flex h-screen items-center justify-center bg-gray-50 dark:bg-gray-900"><Skeleton circle width="w-8" height="h-8" /></div>}>
-      <ChatPage />
+    <Suspense
+      fallback={
+        <div className="flex h-[calc(100dvh-3.5rem)] items-center justify-center">
+          <Skeleton circle width="w-8" height="h-8" />
+        </div>
+      }
+    >
+      <CoomanderChat />
     </Suspense>
   );
 }

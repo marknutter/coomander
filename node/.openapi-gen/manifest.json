@@ -20,6 +20,41 @@
       "code": "response-inference-unresolved",
       "severity": "warning",
       "message": "Could not fully infer a response schema from a return statement. Add an explicit @response tag to make the output deterministic.",
+      "filePath": "/Users/marknutter/Code/maddiehq/node/app/api/coomander/beats/route.ts",
+      "routePath": "/coomander/beats"
+    },
+    {
+      "code": "response-inference-unresolved",
+      "severity": "warning",
+      "message": "Could not fully infer a response schema from a return statement. Add an explicit @response tag to make the output deterministic.",
+      "filePath": "/Users/marknutter/Code/maddiehq/node/app/api/coomander/content/route.ts",
+      "routePath": "/coomander/content"
+    },
+    {
+      "code": "response-inference-unresolved",
+      "severity": "warning",
+      "message": "Could not fully infer a response schema from a return statement. Add an explicit @response tag to make the output deterministic.",
+      "filePath": "/Users/marknutter/Code/maddiehq/node/app/api/coomander/drops/route.ts",
+      "routePath": "/coomander/drops"
+    },
+    {
+      "code": "response-inference-unresolved",
+      "severity": "warning",
+      "message": "Could not fully infer a response schema from a return statement. Add an explicit @response tag to make the output deterministic.",
+      "filePath": "/Users/marknutter/Code/maddiehq/node/app/api/coomander/pillars/route.ts",
+      "routePath": "/coomander/pillars"
+    },
+    {
+      "code": "response-inference-unresolved",
+      "severity": "warning",
+      "message": "Could not fully infer a response schema from a return statement. Add an explicit @response tag to make the output deterministic.",
+      "filePath": "/Users/marknutter/Code/maddiehq/node/app/api/coomander/procurement/route.ts",
+      "routePath": "/coomander/procurement"
+    },
+    {
+      "code": "response-inference-unresolved",
+      "severity": "warning",
+      "message": "Could not fully infer a response schema from a return statement. Add an explicit @response tag to make the output deterministic.",
       "filePath": "/Users/marknutter/Code/maddiehq/node/app/api/platforms/instagram/sync/stream/route.ts",
       "routePath": "/platforms/instagram/sync/stream"
     },
@@ -60,31 +95,31 @@
     }
   ],
   "performance": {
-    "prepareTemplateMs": 0.09733399999998937,
+    "prepareTemplateMs": 0.09699999999997999,
     "loadCustomFragmentsMs": 0.0003330000000119071,
-    "prepareDocumentMs": 0.09766700000000128,
-    "scanRouteFilesMs": 1.972500000000025,
-    "deriveRoutePathMs": 0.25804400000026817,
-    "filterRouteCandidatesMs": 0.24033300000024838,
-    "sourcePrecheckMs": 1.1118749999998272,
-    "readRouteFilesMs": 0.6458719999992013,
-    "parseRouteFilesMs": 17.48962399999948,
-    "analyzeRouteFilesMs": 15.55999799999995,
-    "typescriptResponseInferenceMs": 3557.0508330000002,
-    "processRouteFilesMs": 3590.3478320000004,
-    "registerRouteMs": 1.652583999999024,
+    "prepareDocumentMs": 0.0973329999999919,
+    "scanRouteFilesMs": 3.9093750000000114,
+    "deriveRoutePathMs": 0.306499000000656,
+    "filterRouteCandidatesMs": 0.27399799999165,
+    "sourcePrecheckMs": 6.940337000003353,
+    "readRouteFilesMs": 6.411129000001893,
+    "parseRouteFilesMs": 37.369918000001576,
+    "analyzeRouteFilesMs": 47.59028900000328,
+    "typescriptResponseInferenceMs": 11322.411707999996,
+    "processRouteFilesMs": 11407.871583999993,
+    "registerRouteMs": 3.449039000003438,
     "getSchemaContentMs": 0,
     "createRequestParamsMs": 0,
     "createRequestBodyMs": 0,
-    "processResponsesMs": 0.5145000000002824,
+    "processResponsesMs": 1.3007090000039625,
     "createResponseSchemaMs": 0,
-    "buildOperationsMs": 1.6846259999998665,
-    "sortAndMergePathsMs": 1.0423749999999927,
-    "buildPathsMs": 1.0423749999999927,
-    "defaultComponentsAndErrorsMs": 0.24254199999995762,
-    "mergeSchemasMs": 0.08887499999991633,
-    "finalizeDocumentMs": 14.569124999999985,
-    "totalMs": 3611.983458,
-    "scanRoutesMs": 3594.004958
+    "buildOperationsMs": 3.5658709999909206,
+    "sortAndMergePathsMs": 1.2596250000005966,
+    "buildPathsMs": 1.2596250000005966,
+    "defaultComponentsAndErrorsMs": 0.16829099999995378,
+    "mergeSchemasMs": 0.0520410000008269,
+    "finalizeDocumentMs": 2.639041999998881,
+    "totalMs": 11427.448583000001,
+    "scanRoutesMs": 11415.346829999984
   }
 }
