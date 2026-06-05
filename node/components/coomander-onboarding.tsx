@@ -29,7 +29,8 @@ interface OnboardingStatus {
   complete: boolean;
 }
 
-const ORDER: StepKey[] = ["ops", "cadence", "instagram", "telegram"];
+// Order per #173: enable ops → connect Instagram → confirm cadence → link Telegram.
+const ORDER: StepKey[] = ["ops", "instagram", "cadence", "telegram"];
 
 export interface CoomanderOnboardingProps {
   open: boolean;
@@ -84,7 +85,7 @@ export function CoomanderOnboarding({ open, onClose, onComplete }: CoomanderOnbo
       const res = await fetch("/api/coomander/enable", { method: "POST" });
       if (!res.ok) throw new Error(`enable failed: ${res.status}`);
       await loadStatus();
-      setStep("cadence");
+      setStep("instagram");
       toast.success("Coomander is on — starter playbook seeded.");
     } catch (err) {
       console.error("[Coomander onboarding] enable", err);
@@ -104,7 +105,7 @@ export function CoomanderOnboarding({ open, onClose, onComplete }: CoomanderOnbo
       });
       if (!res.ok) throw new Error(`confirm cadence failed: ${res.status}`);
       await loadStatus();
-      setStep("instagram");
+      setStep("telegram");
     } catch (err) {
       console.error("[Coomander onboarding] cadence", err);
       toast.error("Couldn't save that. Try again.");
