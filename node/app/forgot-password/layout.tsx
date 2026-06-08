@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 
 export const metadata: Metadata = {
   title: "Forgot Password",
-  description: "Reset your MaddieHQ account password.",
+  description: "Reset your Coomander account password.",
 };
 
 export default function ForgotPasswordLayout({

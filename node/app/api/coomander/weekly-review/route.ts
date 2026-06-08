@@ -56,7 +56,7 @@ export async function POST(request: Request) {
   let body: { weekEnding?: unknown } = {};
   try { body = (await request.json()) ?? {}; } catch { body = {}; }
   const weekEnding = typeof body.weekEnding === "string" ? body.weekEnding : mostRecentSunday(new Date());
-  const appUrl = process.env.APP_URL || "https://maddiehq.oqodo.com";
+  const appUrl = process.env.APP_URL || "https://coomander.com";
 
   const recipients = await usersToPing();
   const results: Array<{ userId: string; ok: boolean; error?: string }> = [];

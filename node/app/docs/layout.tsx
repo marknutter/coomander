@@ -6,12 +6,12 @@ import type { ReactNode } from "react";
 export default function Layout({ children }: { children: ReactNode }) {
   return (
     <RootProvider
-      theme={{ attribute: "class", storageKey: "maddiehq-theme" }}
+      theme={{ attribute: "class", storageKey: "coomander-theme" }}
       search={{ options: { api: "/api/docs-search" } }}
     >
       <DocsLayout
         tree={docsSource.pageTree}
-        nav={{ title: "MaddieHQ Docs" }}
+        nav={{ title: "Coomander Docs" }}
       >
         {children}
       </DocsLayout>

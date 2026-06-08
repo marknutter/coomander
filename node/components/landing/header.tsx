@@ -72,7 +72,7 @@ export function LandingHeader() {
           <Link href="/" className="flex items-center gap-2 group">
             <Sprout className="w-6 h-6 text-primary group-hover:scale-110 transition-transform" />
             <span className="text-lg font-bold text-gray-900 dark:text-gray-100">
-              MaddieHQ
+              Coomander
             </span>
           </Link>
 

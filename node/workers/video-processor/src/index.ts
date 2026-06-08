@@ -1,5 +1,5 @@
 // Cloudflare Worker that hosts the VideoProcessor Container Class and
-// exposes a simple HTTP API. The main maddiehq Worker reaches it via
+// exposes a simple HTTP API. The main coomander Worker reaches it via
 // a service binding (`env.VIDEO_PROCESSOR` from getCloudflareContext()).
 
 import { Container, getContainer } from "@cloudflare/containers";

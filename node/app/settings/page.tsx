@@ -289,7 +289,7 @@ export default function SettingsPage() {
   };
 
   const downloadBackupCodes = () => {
-    const appName = process.env.NEXT_PUBLIC_APP_NAME || "MaddieHQ";
+    const appName = process.env.NEXT_PUBLIC_APP_NAME || "Coomander";
     const text = backupCodes.join("\n");
     const blob = new Blob(
       [`${appName} Backup Codes\n\n${text}\n\nSave these codes in a safe place!`],
@@ -409,7 +409,7 @@ export default function SettingsPage() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `maddiehq-export-${new Date().toISOString().slice(0, 10)}.json`;
+      a.download = `coomander-export-${new Date().toISOString().slice(0, 10)}.json`;
       a.click();
       URL.revokeObjectURL(url);
       toast.success("Data exported successfully");
@@ -506,7 +506,7 @@ export default function SettingsPage() {
           >
             <ChevronLeft className="w-4 h-4" />
             <Sprout className="w-5 h-5 text-primary" />
-            <span className="font-bold text-gray-900 dark:text-gray-100">MaddieHQ</span>
+            <span className="font-bold text-gray-900 dark:text-gray-100">Coomander</span>
           </button>
           <div className="flex items-center gap-4">
             <h1 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Settings</h1>

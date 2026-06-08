@@ -9,7 +9,7 @@ interface LifetimePurchaseEmailProps {
 }
 
 export default function LifetimePurchaseEmail({
-  appName = "MaddieHQ",
+  appName = "Coomander",
   appUrl = "https://YOUR_DOMAIN",
 }: LifetimePurchaseEmailProps) {
   return (

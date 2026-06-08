@@ -3,17 +3,17 @@
 **Last updated:** 2026-06-04
 **Status:** Active. Governs all features that send messages on behalf of a creator.
 
-This doc draws the line between communication features MaddieHQ will and won't ship. The line is platform-by-platform because the ToS and ban-risk profiles differ sharply.
+This doc draws the line between communication features Coomander will and won't ship. The line is platform-by-platform because the ToS and ban-risk profiles differ sharply.
 
 ## Core principle
 
-**Ban risk on the IG account is existential** because IG is the top-of-funnel for OF subscriptions. Lose the IG account, lose the funnel, lose the revenue. So MaddieHQ will *not* automate communication on platforms where automation triggers bans, even when competitors do.
+**Ban risk on the IG account is existential** because IG is the top-of-funnel for OF subscriptions. Lose the IG account, lose the funnel, lose the revenue. So Coomander will *not* automate communication on platforms where automation triggers bans, even when competitors do.
 
-Where automation is permitted by the platform — OF, Telegram, WhatsApp — MaddieHQ will build communication features deliberately, with human gatekeepers where appropriate.
+Where automation is permitted by the platform — OF, Telegram, WhatsApp — Coomander will build communication features deliberately, with human gatekeepers where appropriate.
 
 ## Decision matrix
 
-| Channel | Direction | MaddieHQ posture |
+| Channel | Direction | Coomander posture |
 |---|---|---|
 | Coomander → creator (Telegram) | Outbound | **In scope.** Creator-consented, no third-party visibility. |
 | Creator → Coomander (Telegram) | Inbound | **In scope.** Webhook + tool-use classifier. |
@@ -30,7 +30,7 @@ Where automation is permitted by the platform — OF, Telegram, WhatsApp — Mad
 For OF / Telegram / WhatsApp fan messaging, the architecture is:
 
 1. **Coomander generates** suggested response, sexting script segment, or mass-DM template, grounded in the creator's voice corpus (#149) and any fan context the creator has supplied.
-2. **The output is staged** for review — either in the MaddieHQ web UI or piped to the chatting team's existing tooling.
+2. **The output is staged** for review — either in the Coomander web UI or piped to the chatting team's existing tooling.
 3. **A human sends it.** No automated send. No background job that fires copy to a real fan without a human key press.
 
 This stays on the right side of platform terms and the right side of brand-safety. It also matches the actual workflow the creator-research surfaced: the agency's chatting team is real humans using scripts and intelligence the manager provides. We're slotting in as the intelligence supplier, not displacing the human.
@@ -48,9 +48,9 @@ If we ever change posture on IG, this doc gets updated *first*, and the change r
 
 ## Adjacent rule: AI content tagging
 
-For any content MaddieHQ generates that ends up published on OF (scripts, captions, image assistance), the **OF 2026 AI disclosure rules apply**:
+For any content Coomander generates that ends up published on OF (scripts, captions, image assistance), the **OF 2026 AI disclosure rules apply**:
 - Content "depicting the creator" produced with AI assistance must be tagged `#AI` / `#AIGenerated` per OF policy.
-- Deepfakes of any real person other than the verified creator are immediate-ban — MaddieHQ does not generate face-swapped imagery of the creator or anyone else.
+- Deepfakes of any real person other than the verified creator are immediate-ban — Coomander does not generate face-swapped imagery of the creator or anyone else.
 - Voice cloning is limited to the creator's own voice with their explicit consent (matches ElevenLabs Professional Voice Clone requirements).
 
 This is enforced in code at the generation layer, not left to creator discretion.

@@ -1,15 +1,15 @@
 # Standalone Cloudflare Worker that owns the VideoProcessor Container.
-# Deployed independently of the main maddiehq Worker:
+# Deployed independently of the main coomander Worker:
 #
 #   cd node/workers/video-processor
 #   wrangler containers build
 #   wrangler containers push
 #   wrangler deploy
 #
-# The main maddiehq Worker reaches this service via the `VIDEO_PROCESSOR`
+# The main coomander Worker reaches this service via the `VIDEO_PROCESSOR`
 # service binding declared in node/wrangler.toml.
 
-name = "maddiehq-video-processor"
+name = "coomander-video-processor"
 main = "src/index.ts"
 compatibility_date = "2025-04-01"
 compatibility_flags = ["nodejs_compat"]

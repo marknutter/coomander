@@ -59,7 +59,7 @@ export async function POST(request: Request) {
     if (!userId) {
       await sendTelegram(
         chatId,
-        "I do not recognize this chat yet. Enable Coomander in MaddieHQ and link this Telegram to start.",
+        "I do not recognize this chat yet. Enable Coomander in Coomander and link this Telegram to start.",
       );
       return NextResponse.json({ ok: true, ignored: "unlinked chat" });
     }

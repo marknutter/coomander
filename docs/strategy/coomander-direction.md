@@ -4,13 +4,13 @@
 **Status:** Active. Canonical reference for ops-layer epics #150–#154 and Ops E/G/H.
 **Companion docs:** `communication-policy.md`, `features-brainstorm.md`.
 
-This doc captures the validated direction for Coomander — the AI ops agent inside MaddieHQ. It's the canonical artifact; GitHub issues are implementation contracts pointing at it.
+This doc captures the validated direction for Coomander — the AI ops agent inside Coomander. It's the canonical artifact; GitHub issues are implementation contracts pointing at it.
 
 ## Scope
 
-**OF-only.** MaddieHQ is focused exclusively on the OF creator workflow: top-of-funnel content on IG, OF subscription, OF wall + PPV monetization, fan chat assistance. Adjacent creator-economy work (TikTok-as-primary, Twitch streaming, brand businesses) is **out of scope** — Coomander does not track, plan around, or know about them.
+**OF-only.** Coomander is focused exclusively on the OF creator workflow: top-of-funnel content on IG, OF subscription, OF wall + PPV monetization, fan chat assistance. Adjacent creator-economy work (TikTok-as-primary, Twitch streaming, brand businesses) is **out of scope** — Coomander does not track, plan around, or know about them.
 
-This was a deliberate narrowing after the creator-research synthesis (June 2026). Real OF creators run parallel ventures, but MaddieHQ wins by going deep on one workflow rather than being a generic creator operating system.
+This was a deliberate narrowing after the creator-research synthesis (June 2026). Real OF creators run parallel ventures, but Coomander wins by going deep on one workflow rather than being a generic creator operating system.
 
 ## What Coomander is
 

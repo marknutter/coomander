@@ -14,7 +14,7 @@ import { config } from "dotenv";
 config({ path: ".env.local" });
 config({ path: ".env" });
 
-const dbPath = process.env.DATABASE_PATH || "./data/maddiehq.db";
+const dbPath = process.env.DATABASE_PATH || "./data/coomander.db";
 const token = process.env.INSTAGRAM_INITIAL_TOKEN;
 if (!token) {
   console.error("INSTAGRAM_INITIAL_TOKEN not set in .env.local");

@@ -1,6 +1,6 @@
-# MaddieHQ
+# Coomander
 
-Maddie's HQ.
+Coomander.
 
 ## Getting Started
 

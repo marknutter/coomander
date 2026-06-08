@@ -9,7 +9,7 @@ import path from "path";
 import fs from "fs";
 import { rollbackMigration } from "../lib/migrate";
 
-const dbPath = process.env.DATABASE_PATH || "./data/maddiehq.db";
+const dbPath = process.env.DATABASE_PATH || "./data/coomander.db";
 const dir = path.dirname(dbPath);
 if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 

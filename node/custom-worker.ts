@@ -19,7 +19,7 @@
  * before deciding whether to actually send. Keep CRON_SLOT in sync with
  * wrangler.toml `[triggers]` and lib/coomander/scheduling.ts CRON_SLOT_MAP.
  *
- * Unlike geology there is no Sentry wrapper here — MaddieHQ does not depend on
+ * Unlike geology there is no Sentry wrapper here — Coomander does not depend on
  * @sentry/cloudflare. If server-side capture is added later, wrap `worker` the
  * same way geology does.
  */
@@ -39,7 +39,7 @@ const CRON_SLOT = {
 const WEEKLY_REVIEW_CRON = "0 1 * * 1";
 
 async function post(path, env, ctx, payload) {
-  const req = new Request(`https://maddiehq.oqodo.com${path}`, {
+  const req = new Request(`https://coomander.com${path}`, {
     method: "POST",
     headers: { "content-type": "application/json", "x-agent-secret": env.COOMANDER_RUN_SECRET ?? "" },
     body: JSON.stringify(payload),

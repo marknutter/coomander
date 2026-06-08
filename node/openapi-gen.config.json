@@ -1,9 +1,9 @@
 {
   "openapi": "3.0.0",
   "info": {
-    "title": "MaddieHQ API",
+    "title": "Coomander API",
     "version": "1.0.0",
-    "description": "REST API for MaddieHQ."
+    "description": "REST API for Coomander."
   },
   "servers": [
     {

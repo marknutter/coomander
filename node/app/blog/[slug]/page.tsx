@@ -50,7 +50,7 @@ export default async function BlogPostPage({ params }: BlogPostPageProps) {
           <Link href="/" className="flex items-center gap-2 group">
             <Sprout className="w-5 h-5 text-primary group-hover:scale-110 transition-transform" />
             <span className="font-bold text-gray-900 dark:text-gray-100">
-              MaddieHQ
+              Coomander
             </span>
           </Link>
           <nav className="flex items-center gap-4 text-sm">

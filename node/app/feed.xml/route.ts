@@ -7,7 +7,7 @@ export const dynamic = "force-static";
  * Available at /feed.xml
  */
 export async function GET() {
-  const siteUrl = process.env.BETTER_AUTH_URL || "https://maddiehq.example.com";
+  const siteUrl = process.env.BETTER_AUTH_URL || "https://coomander.example.com";
   const posts = getAllPosts();
 
   const items = posts
@@ -28,9 +28,9 @@ export async function GET() {
   const rss = `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
   <channel>
-    <title>MaddieHQ Blog</title>
+    <title>Coomander Blog</title>
     <link>${siteUrl}/blog</link>
-    <description>Updates from MaddieHQ.</description>
+    <description>Updates from Coomander.</description>
     <language>en-us</language>
     <lastBuildDate>${new Date().toUTCString()}</lastBuildDate>
     <atom:link href="${siteUrl}/feed.xml" rel="self" type="application/rss+xml" />

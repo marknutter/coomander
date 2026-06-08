@@ -1,12 +1,12 @@
-# Deploying MaddieHQ to Cloudflare Workers
+# Deploying Coomander to Cloudflare Workers
 
-MaddieHQ deploys as a **Cloudflare Worker** (not Pages) via OpenNext. The app lives
+Coomander deploys as a **Cloudflare Worker** (not Pages) via OpenNext. The app lives
 in `node/`, builds to `.open-next/`, and ships through a custom worker entrypoint
 (`node/custom-worker.ts`) that wraps the OpenNext bundle and adds the Coomander
 cron `scheduled()` handler.
 
 - **Runtime:** Cloudflare Workers + D1 (SQLite) + R2 (object storage)
-- **Custom domain:** `maddiehq.oqodo.com` (from `wrangler.toml` `routes`)
+- **Custom domain:** `coomander.com` (from `wrangler.toml` `routes`)
 - **Cron triggers:** defined in `wrangler.toml` `[triggers]` (daily Coomander
   slots + the Sunday weekly review) — picked up automatically on deploy
 - **DB driver in prod:** D1 (`DATABASE_DRIVER = "d1"` in `wrangler.toml [vars]`)
@@ -19,17 +19,17 @@ There is **no Docker production image** — Docker is local-dev only (see
 ## Option A — Cloudflare Workers Builds (Git integration, recommended)
 
 Connect the GitHub repo to the Worker so Cloudflare builds + deploys on push to
-`main`. Configure in the dashboard: **Workers & Pages → `maddiehq` → Settings →
+`main`. Configure in the dashboard: **Workers & Pages → `coomander` → Settings →
 Build → Connect to Git**.
 
 | Field | Value |
 |---|---|
-| Repository | `marknutter/maddiehq` |
+| Repository | `marknutter/coomander` |
 | Production branch | `main` |
 | Non-production branch builds | **Disabled** (`develop` is local-dev-only; no preview deploys) |
 | Root directory | `node` |
 | Build command | `npx opennextjs-cloudflare build` |
-| Deploy command | `npx wrangler d1 migrations apply maddiehq-db --remote && npx opennextjs-cloudflare deploy` |
+| Deploy command | `npx wrangler d1 migrations apply coomander-db --remote && npx opennextjs-cloudflare deploy` |
 | Node version | `22` (also pinned via `node/.node-version`) |
 
 Notes:
@@ -48,9 +48,9 @@ Set these as **build variables** in the Workers Builds config (read by
 | Var | Value |
 |---|---|
 | `NODE_VERSION` | `22` |
-| `BETTER_AUTH_URL` | `https://maddiehq.oqodo.com` |
-| `APP_URL` | `https://maddiehq.oqodo.com` |
-| `APP_NAME` | `MaddieHQ` |
+| `BETTER_AUTH_URL` | `https://coomander.com` |
+| `APP_URL` | `https://coomander.com` |
+| `APP_NAME` | `Coomander` |
 | `BETTER_AUTH_SECRET` | any non-empty placeholder (the real value is a runtime secret) |
 
 > Do **not** put real secrets in `node/.env.local` for prod — `next build` bakes
@@ -65,7 +65,7 @@ Set these as **build variables** in the Workers Builds config (read by
 cd node
 npm ci
 npm run build:cf                                  # opennextjs-cloudflare build
-npx wrangler d1 migrations apply maddiehq-db --remote
+npx wrangler d1 migrations apply coomander-db --remote
 npm run deploy:cf                                 # opennextjs-cloudflare deploy
 ```
 
@@ -77,7 +77,7 @@ the environment). Use node 22.
 ## Runtime secrets (set once via `wrangler secret put`)
 
 These live on the Worker (Settings → Variables and Secrets), NOT in git. Already
-configured on the `maddiehq` Worker:
+configured on the `coomander` Worker:
 
 | Secret | Purpose |
 |---|---|
@@ -99,11 +99,11 @@ echo 'VALUE' | npx wrangler secret put SECRET_NAME
 
 ## Bindings (from `wrangler.toml`)
 
-- **D1** `DB` → database `maddiehq-db` (`database_id` in `wrangler.toml`). Must
-  exist before first deploy (`wrangler d1 create maddiehq-db` if not).
-- **R2** `STORAGE` → bucket `maddiehq-storage` (enable R2 + create the bucket
+- **D1** `DB` → database `coomander-db` (`database_id` in `wrangler.toml`). Must
+  exist before first deploy (`wrangler d1 create coomander-db` if not).
+- **R2** `STORAGE` → bucket `coomander-storage` (enable R2 + create the bucket
   before first deploy).
-- **Service** `VIDEO_PROCESSOR` → the separately-deployed `maddiehq-video-processor`
+- **Service** `VIDEO_PROCESSOR` → the separately-deployed `coomander-video-processor`
   worker (see `node/workers/video-processor/`).
 
 ---
@@ -136,11 +136,11 @@ TOKEN=$(grep '^MADDIE_TELEGRAM_BOT_TOKEN=' .env.local | cut -d= -f2)
 SECRET=$(grep '^MADDIE_TELEGRAM_WEBHOOK_SECRET=' .env.local | cut -d= -f2)
 curl -X POST "https://api.telegram.org/bot${TOKEN}/setWebhook" \
   -H "Content-Type: application/json" \
-  -d "{\"url\":\"https://maddiehq.oqodo.com/api/coomander/webhook\",\"secret_token\":\"${SECRET}\"}"
+  -d "{\"url\":\"https://coomander.com/api/coomander/webhook\",\"secret_token\":\"${SECRET}\"}"
 ```
 
 For dev testing you can point the webhook at the tailnet URL instead
-(`https://maddiehq.<tailnet>.ts.net/api/coomander/webhook`) — real HTTPS, works.
+(`https://coomander.<tailnet>.ts.net/api/coomander/webhook`) — real HTTPS, works.
 `... /getWebhookInfo` shows status; `... /deleteWebhook` removes it.
 
 ---

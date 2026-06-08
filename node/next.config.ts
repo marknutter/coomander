@@ -22,7 +22,7 @@ const nextConfig: NextConfig = {
     "localhost",
     "127.0.0.1",
     "mark-nutters-macbook-pro-2.gate-cardassian.ts.net",
-    "maddiehq.gate-cardassian.ts.net",
+    "coomander.gate-cardassian.ts.net",
     "*.gate-cardassian.ts.net",
   ],
   async headers() {

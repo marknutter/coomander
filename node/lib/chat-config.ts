@@ -16,7 +16,7 @@ export const CHAT_CONFIG = {
   contextWindowSize: 20,
 
   /** App name injected into system prompt */
-  appName: process.env.APP_NAME || "MaddieHQ",
+  appName: process.env.APP_NAME || "Coomander",
 };
 
 /**

@@ -119,7 +119,7 @@ export function getD1Binding(): D1Binding | null {
 function initSqliteDb(): InstanceType<typeof Database> {
   if (rawDb) return rawDb;
 
-  const dbPath = process.env.DATABASE_PATH || "./data/maddiehq.db";
+  const dbPath = process.env.DATABASE_PATH || "./data/coomander.db";
   const dir = path.dirname(dbPath);
 
   if (!fs.existsSync(dir)) {
