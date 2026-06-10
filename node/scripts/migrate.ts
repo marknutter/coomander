@@ -10,7 +10,7 @@ import fs from "fs";
 import { runMigrations, getMigrationStatus } from "../lib/migrate";
 import { bootstrapAuthSchema } from "../lib/auth-schema";
 
-const dbPath = process.env.DATABASE_PATH || "./data/maddiehq.db";
+const dbPath = process.env.DATABASE_PATH || "./data/coomander.db";
 const dir = path.dirname(dbPath);
 if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 

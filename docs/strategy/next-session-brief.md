@@ -8,7 +8,7 @@
 
 ## 1. Where we are
 
-MaddieHQ is an OF-creator analytics + operations product. The strategic direction was sharpened across a series of working sessions ending 2026-06-04, after Maddie (the dogfood creator) shared 4 months of WhatsApp transcripts with her management team and her personal learning notes from the program.
+Coomander is an OF-creator analytics + operations product. The strategic direction was sharpened across a series of working sessions ending 2026-06-04, after Maddie (the dogfood creator) shared 4 months of WhatsApp transcripts with her management team and her personal learning notes from the program.
 
 Two product surfaces are live in the issue tracker:
 
@@ -32,7 +32,7 @@ The big decisions, in case you only read this file:
 1. **`docs/strategy/coomander-direction.md`** — the canonical direction doc. Everything Coomander-related points at it.
 2. **`docs/strategy/communication-policy.md`** — the channel-by-channel posture. Every comms feature touches this.
 3. **`docs/strategy/features-brainstorm.md`** — the OG strategy memo. Useful for understanding *why* the insight epics exist, even though we're not building them yet.
-4. **`AGENTS.md`** — MaddieHQ's own operational guide.
+4. **`AGENTS.md`** — Coomander's own operational guide.
 5. **`~/Code/geology/web/node/lib/geology/`** — the agent infrastructure we're porting. Specifically the files listed in `#151`'s acceptance criteria. Don't reinvent; literal-port.
 6. **`~/Code/geology/AGENTS.md`** § "Agent ping loop (Geo, #13)" and § "Inbound Telegram reply -> carve (#33)" — operational lore for the agent pattern. Specifically the TOML gotcha at the bottom of that section.
 
@@ -47,7 +47,7 @@ These are the human gates that block implementation. None of them are technical,
 The Telegram bot token (`8641207048:AAGMERWKRZ...`) was provided 2026-06-04. It's kept out of git for obvious reasons; it lives in Mark's password manager.
 
 ```bash
-cd /Users/marknutter/Code/maddiehq/node
+cd /Users/marknutter/Code/coomander/node
 npx wrangler secret put MADDIE_TELEGRAM_BOT_TOKEN
 # paste the token when prompted
 
@@ -64,10 +64,10 @@ Once we have a deployed URL (after the first PR ships and deploys), point the bo
 ```bash
 curl -X POST "https://api.telegram.org/bot${MADDIE_TELEGRAM_BOT_TOKEN}/setWebhook" \
   -H "Content-Type: application/json" \
-  -d '{"url": "https://maddiehq.oqodo.com/api/coomander/webhook"}'
+  -d '{"url": "https://coomander.com/api/coomander/webhook"}'
 ```
 
-For dev testing, you can point it at the tailnet URL instead (e.g. `https://maddiehq.<tailnet>.ts.net/api/coomander/webhook`) — works fine because the tailnet has real HTTPS.
+For dev testing, you can point it at the tailnet URL instead (e.g. `https://coomander.<tailnet>.ts.net/api/coomander/webhook`) — works fine because the tailnet has real HTTPS.
 
 ### 3.3 Confirm Mark's Telegram chat_id is on the user row
 
@@ -82,14 +82,14 @@ Per Mark's global rules: substantial new vertical, work shouldn't ship to `main`
 The procedure is documented in `~/.claude/rules/git-workflow.md` § "Creating a `develop` branch". Concretely:
 
 ```bash
-cd /Users/marknutter/Code/maddiehq
+cd /Users/marknutter/Code/coomander
 git checkout main
 git pull
 git checkout -b develop
 git push -u origin develop
 
 # Try to apply branch protection on main. This may fail with 403 on free private repos.
-gh api -X PUT "repos/marknutter/maddiehq/branches/main/protection" \
+gh api -X PUT "repos/marknutter/coomander/branches/main/protection" \
   -f required_status_checks=null \
   -f enforce_admins=false \
   -f required_pull_request_reviews=null \
@@ -108,12 +108,12 @@ If protection is rejected: log a one-line note, move on. The workflow is Gitflow
 
 ## 5. Verify the dev environment (Step 2)
 
-MaddieHQ already has the Docker + Caddy+Tailscale sidecar pattern from `~/Code/geology`. The compose file is at `docker-compose.yml` at the repo root. **Do not rewrite this — it works.** The sidecar joins the tailnet as `maddiehq` and provisions a real HTTPS cert via Tailscale ACME, which is required because iOS Safari refuses plain HTTP on `*.ts.net`.
+Coomander already has the Docker + Caddy+Tailscale sidecar pattern from `~/Code/geology`. The compose file is at `docker-compose.yml` at the repo root. **Do not rewrite this — it works.** The sidecar joins the tailnet as `coomander` and provisions a real HTTPS cert via Tailscale ACME, which is required because iOS Safari refuses plain HTTP on `*.ts.net`.
 
 ### 5.1 Verify it starts
 
 ```bash
-cd /Users/marknutter/Code/maddiehq
+cd /Users/marknutter/Code/coomander
 docker compose up -d
 docker compose logs -f caddy-dev | head -40
 docker compose logs -f app-dev | head -40
@@ -125,7 +125,7 @@ You should see:
 
 **Reachable at:**
 - `http://localhost:3005` (host port mapped by the sidecar)
-- `https://maddiehq.<tailnet>.ts.net` (real HTTPS, works from Mark's phone)
+- `https://coomander.<tailnet>.ts.net` (real HTTPS, works from Mark's phone)
 
 ### 5.2 If the sidecar doesn't start
 
@@ -133,7 +133,7 @@ The most likely culprit is missing `TS_AUTHKEY`. Mark needs an auth key from htt
 
 ```
 TS_AUTHKEY=tskey-auth-...
-TS_HOSTNAME=maddiehq
+TS_HOSTNAME=coomander
 DEV_PORT=3005
 ```
 
@@ -147,7 +147,7 @@ Check Better Auth's `trustedOrigins` — must include the tailnet URL AND keep `
 
 ### 5.4 Smoke test
 
-Sign in at `https://maddiehq.<tailnet>.ts.net` with the dev seed credentials (admin@example.com / password if that's still the seeded admin; check `node/scripts/seed.ts`). Navigate to `/app`. The dashboard should render with the Insights card. If it does, the environment is good.
+Sign in at `https://coomander.<tailnet>.ts.net` with the dev seed credentials (admin@example.com / password if that's still the seeded admin; check `node/scripts/seed.ts`). Navigate to `/app`. The dashboard should render with the Insights card. If it does, the environment is good.
 
 ---
 
@@ -288,11 +288,11 @@ If `docker pull` hangs silently under OrbStack, suspect `proxyproxy.orb.internal
 
 ## 10. Where to find help
 
-- **MaddieHQ project guide**: `/Users/marknutter/Code/maddiehq/AGENTS.md`
+- **Coomander project guide**: `/Users/marknutter/Code/coomander/AGENTS.md`
 - **Geology reference**: `/Users/marknutter/Code/geology/AGENTS.md` and `/Users/marknutter/Code/geology/web/AGENTS.md`
-- **Strategy memos**: `/Users/marknutter/Code/maddiehq/docs/strategy/*.md`
+- **Strategy memos**: `/Users/marknutter/Code/coomander/docs/strategy/*.md`
 - **Mark's global rules**: `/Users/marknutter/.claude/rules/*.md` (router at `~/.claude/CLAUDE.md`)
-- **Per-project memory**: `/Users/marknutter/.claude/projects/-Users-marknutter-Code-maddiehq/memory/MEMORY.md`
+- **Per-project memory**: `/Users/marknutter/.claude/projects/-Users-marknutter-Code-coomander/memory/MEMORY.md`
 
 ---
 

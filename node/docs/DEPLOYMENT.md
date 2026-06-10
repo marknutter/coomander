@@ -1,6 +1,6 @@
 # Deployment Guide
 
-This guide covers deploying MaddieHQ projects to local Docker (Mac mini + Caddy) and Railway cloud hosting.
+This guide covers deploying Coomander projects to local Docker (Mac mini + Caddy) and Railway cloud hosting.
 
 ## Quick Start
 
@@ -42,7 +42,7 @@ Pick an unused port (check existing ports in `docker-compose.yml`):
 3002 = oqodo-main
 3003 = links
 3004 = month-by-month
-3006 = maddiehq
+3006 = coomander
 3006 = betterdocs
 3007 = holyshit
 3008 = listenback
@@ -72,7 +72,7 @@ services:
     volumes:
       - ./your-app-name/data:/data  # Persistent SQLite storage
     environment:
-      DATABASE_PATH: /data/maddiehq.db
+      DATABASE_PATH: /data/coomander.db
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET}
       BETTER_AUTH_URL: https://yourapp.oqodo.com
       APP_URL: https://yourapp.oqodo.com
@@ -162,7 +162,7 @@ In Railway dashboard:
 - Mount path: `/data`
 - Size: 500MB (free tier)
 
-**Critical:** Volume must exist BEFORE setting `DATABASE_PATH=/data/maddiehq.db`
+**Critical:** Volume must exist BEFORE setting `DATABASE_PATH=/data/coomander.db`
 
 #### 4. Set Environment Variables
 Via CLI:
@@ -171,7 +171,7 @@ railway variables set BETTER_AUTH_SECRET="$(openssl rand -base64 32)"
 railway variables set BETTER_AUTH_URL="https://yourapp.up.railway.app"
 railway variables set APP_URL="https://yourapp.up.railway.app"
 railway variables set APP_NAME="MyApp"
-railway variables set DATABASE_PATH="/data/maddiehq.db"
+railway variables set DATABASE_PATH="/data/coomander.db"
 railway variables set GOOGLE_CLIENT_ID="your-client-id"
 railway variables set GOOGLE_CLIENT_SECRET="your-client-secret"
 railway variables set GITHUB_CLIENT_ID="your-client-id"
@@ -226,7 +226,7 @@ Or in dashboard: Deployments → View Logs
 ```bash
 BETTER_AUTH_SECRET=<openssl rand -base64 32>  # Secret for Better Auth sessions
 BETTER_AUTH_URL=https://yourapp.com           # Better Auth base URL (same as APP_URL)
-DATABASE_PATH=/data/maddiehq.db                # SQLite database location
+DATABASE_PATH=/data/coomander.db                # SQLite database location
 APP_URL=https://yourapp.com                   # Your app's public URL
 APP_NAME=MyApp                                # Display name in emails and MFA
 ```
@@ -279,14 +279,14 @@ volumes:
   - ./your-app/data:/data  # Maps host folder to container /data
 ```
 
-Database file: `./your-app/data/maddiehq.db`
+Database file: `./your-app/data/coomander.db`
 
 **Important:** The `data/` folder persists across container restarts. Back it up regularly!
 
 ### Railway Volume
 1. Create volume in dashboard: Variables → Add Volume
 2. Mount path: `/data`
-3. Set `DATABASE_PATH=/data/maddiehq.db`
+3. Set `DATABASE_PATH=/data/coomander.db`
 
 Volume survives redeployments. Download backups via dashboard.
 
@@ -317,7 +317,7 @@ LITESTREAM_REPLICA_REGION=us-east-1
 docker-compose up -d prod litestream
 ```
 
-The `litestream` service shares the `maddiehq_data` volume with the `prod` service and continuously replicates the database to your bucket.
+The `litestream` service shares the `coomander_data` volume with the `prod` service and continuously replicates the database to your bucket.
 
 ### Restore from Backup
 
@@ -328,7 +328,7 @@ If you need to restore the database (disaster recovery, new server, etc.):
 bash scripts/litestream-restore.sh ./data/restored.db
 
 # To restore directly to the production path:
-bash scripts/litestream-restore.sh ./data/maddiehq.db
+bash scripts/litestream-restore.sh ./data/coomander.db
 ```
 
 The script uses Docker to run `litestream restore`, pulling the latest snapshot and WAL segments from the replica.
@@ -393,7 +393,7 @@ One or more required env vars are missing or invalid. Read the error output — 
 ### Health check returns `auth: false`
 Better Auth migrations did not run or failed. Check container logs for migration errors. Trigger manually:
 ```bash
-docker exec maddiehq-node npx @better-auth/cli@latest migrate --config lib/auth.ts
+docker exec coomander-node npx @better-auth/cli@latest migrate --config lib/auth.ts
 ```
 
 ### Docker: "Address already in use"
@@ -412,7 +412,7 @@ railway variables set BETTER_AUTH_URL="https://yourapp.up.railway.app"
 ### Railway: "SQLITE_CANTOPEN"
 Database path issue. Ensure:
 1. Volume exists at `/data`
-2. `DATABASE_PATH=/data/maddiehq.db` is set
+2. `DATABASE_PATH=/data/coomander.db` is set
 3. App has write permissions (NextJS runs as user `nextjs`)
 
 ### OAuth: "Redirect URI mismatch"

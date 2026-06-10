@@ -9,7 +9,7 @@ interface WelcomeEmailProps {
 }
 
 export default function WelcomeEmail({
-  appName = "MaddieHQ",
+  appName = "Coomander",
   appUrl = "https://YOUR_DOMAIN",
 }: WelcomeEmailProps) {
   return (

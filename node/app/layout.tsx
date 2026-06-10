@@ -5,27 +5,27 @@ import { CommandPaletteProvider } from "@/components/ui/command-palette";
 import { CookieConsent } from "@/components/cookie-consent";
 import "./globals.css";
 
-const siteUrl = process.env.BETTER_AUTH_URL || "https://maddiehq.example.com";
+const siteUrl = process.env.BETTER_AUTH_URL || "https://coomander.example.com";
 
 export const metadata: Metadata = {
   title: {
-    default: "MaddieHQ — Maddie's HQ",
-    template: "%s | MaddieHQ",
+    default: "Coomander — Coomander",
+    template: "%s | Coomander",
   },
-  description: "Maddie's HQ.",
+  description: "Coomander.",
   metadataBase: new URL(siteUrl),
   openGraph: {
     type: "website",
     locale: "en_US",
     url: siteUrl,
-    siteName: "MaddieHQ",
-    title: "MaddieHQ — Maddie's HQ",
-    description: "Maddie's HQ.",
+    siteName: "Coomander",
+    title: "Coomander — Coomander",
+    description: "Coomander.",
   },
   twitter: {
     card: "summary_large_image",
-    title: "MaddieHQ — Maddie's HQ",
-    description: "Maddie's HQ.",
+    title: "Coomander — Coomander",
+    description: "Coomander.",
   },
   robots: {
     index: true,
@@ -46,7 +46,7 @@ export const metadata: Metadata = {
 const themeScript = `
 (function() {
   try {
-    var stored = localStorage.getItem('maddiehq-theme');
+    var stored = localStorage.getItem('coomander-theme');
     var theme = stored || 'system';
     var resolved = theme;
     if (theme === 'system') {

@@ -3,7 +3,7 @@ import { Sprout } from "lucide-react";
 
 export const metadata = {
   title: "Terms of Service",
-  description: "Terms governing your use of the MaddieHQ service.",
+  description: "Terms governing your use of the Coomander service.",
 };
 
 /**
@@ -21,7 +21,7 @@ export default function TermsOfService() {
         <div className="max-w-3xl mx-auto px-6 py-4 flex items-center justify-between">
           <Link href="/" className="flex items-center gap-2 group">
             <Sprout className="w-5 h-5 text-primary group-hover:scale-110 transition-transform" />
-            <span className="font-bold text-gray-900 dark:text-gray-100">MaddieHQ</span>
+            <span className="font-bold text-gray-900 dark:text-gray-100">Coomander</span>
           </Link>
           <Link
             href="/auth?tab=signup"

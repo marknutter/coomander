@@ -1,9 +1,9 @@
-# MaddieHQ
+# Coomander
 
-Maddie's HQ — a Next.js app deployed on Cloudflare Workers + D1 + R2.
+Coomander — a Next.js app deployed on Cloudflare Workers + D1 + R2.
 
-Production: <https://maddiehq.oqodo.com>
-Dev (tailnet): <https://maddiehq.gate-cardassian.ts.net>
+Production: <https://coomander.com>
+Dev (tailnet): <https://coomander.gate-cardassian.ts.net>
 Dev (local):   <http://localhost:3005>
 
 ## Quick start
@@ -12,7 +12,7 @@ Dev (local):   <http://localhost:3005>
 cd node
 cp .env.example .env.local      # fill in BETTER_AUTH_SECRET, etc.
 npm install
-npm run db:migrate              # local SQLite at node/data/maddiehq.db
+npm run db:migrate              # local SQLite at node/data/coomander.db
 npm run dev                     # http://localhost:3005
 ```
 
@@ -27,7 +27,7 @@ docker compose logs -f
 docker compose down
 ```
 
-The sidecar joins the tailnet as `${TS_HOSTNAME}` (default `maddiehq`) and serves HTTPS at `https://maddiehq.<your-tailnet>.ts.net`. Same `next dev` process is reachable via `localhost:3005` on the Mac.
+The sidecar joins the tailnet as `${TS_HOSTNAME}` (default `coomander`) and serves HTTPS at `https://coomander.<your-tailnet>.ts.net`. Same `next dev` process is reachable via `localhost:3005` on the Mac.
 
 ### Refreshing dev container dependencies
 
@@ -41,7 +41,7 @@ If `node_modules` gets fully wedged:
 
 ```bash
 docker compose down
-docker volume rm maddiehq_node_modules
+docker volume rm coomander_node_modules
 docker compose up
 ```
 
@@ -67,9 +67,9 @@ Access the dev container from your phone (or any tailnet device) over real HTTPS
 3. Create `.env` at the project root:
    ```
    TS_AUTHKEY=tskey-auth-...
-   TS_HOSTNAME=maddiehq
+   TS_HOSTNAME=coomander
    DEV_PORT=3005
-   APP_URL=https://maddiehq.gate-cardassian.ts.net
+   APP_URL=https://coomander.gate-cardassian.ts.net
    ```
 4. `docker compose up -d`
 
@@ -83,8 +83,8 @@ If the tailnet hostname doesn't resolve on iPhone: open the Tailscale iOS app �
 
 OAuth providers (Google, GitHub, Microsoft) need both URLs allow-listed:
 
-- `https://maddiehq.oqodo.com/api/auth/callback/<provider>` — production
-- `https://maddiehq.gate-cardassian.ts.net/api/auth/callback/<provider>` — tailnet dev
+- `https://coomander.com/api/auth/callback/<provider>` — production
+- `https://coomander.gate-cardassian.ts.net/api/auth/callback/<provider>` — tailnet dev
 
 Set up via `/configure-sso` — it knows about both.
 
@@ -95,8 +95,8 @@ Set up via `/configure-sso` — it knows about both.
 | `BETTER_AUTH_SECRET` | Yes | ≥32 chars; `openssl rand -base64 32`. Set on CF via `wrangler secret put`. |
 | `BETTER_AUTH_URL` | Yes | Public URL of the app (Better Auth uses for callbacks). |
 | `APP_URL` | Yes | Same as above; used in emails and Stripe redirects. |
-| `APP_NAME` | No | Display name; defaults to `MaddieHQ`. |
-| `DATABASE_PATH` | Local dev only | SQLite file path; defaults to `./data/maddiehq.db`. Ignored on CF (D1 binding takes over). |
+| `APP_NAME` | No | Display name; defaults to `Coomander`. |
+| `DATABASE_PATH` | Local dev only | SQLite file path; defaults to `./data/coomander.db`. Ignored on CF (D1 binding takes over). |
 | `RESEND_API_KEY` | If using email | Transactional email via Resend. |
 | `STRIPE_SECRET_KEY` | If using payments | Stripe API key. |
 | `STRIPE_PRICE_ID` | If using payments | Subscription price ID. |
@@ -111,7 +111,7 @@ Local: put these in `node/.env.local` (gitignored). Production: `npx wrangler se
 ## Project structure
 
 ```
-maddiehq/
+coomander/
 ├── node/                  # Next.js app (the only stack)
 │   ├── app/               # App Router pages + API routes
 │   ├── components/        # React components
@@ -121,7 +121,7 @@ maddiehq/
 │   └── wrangler.toml      # Cloudflare Workers config
 ├── tailscale/Caddyfile    # Caddy + tsnet config for the dev sidecar
 ├── docker-compose.yml     # Local dev (single profile-less stack)
-├── legacy/                # Pre-AppSeed maddiehq, archived
+├── legacy/                # Pre-AppSeed coomander, archived
 ├── CLAUDE.md              # AI assistant instructions
 └── AGENTS.md              # → points to this README (feature docs live here)
 ```
@@ -145,16 +145,16 @@ npm run deploy:cf
 | Change | Run |
 |---|---|
 | Code only | `npm run build:cf && npm run deploy:cf` |
-| New SQL migration | `npx wrangler d1 migrations apply maddiehq-db --remote`, then deploy |
+| New SQL migration | `npx wrangler d1 migrations apply coomander-db --remote`, then deploy |
 | New secret | `npx wrangler secret put VAR_NAME` (no redeploy needed; secrets hot-reload) |
 | New non-secret env var | Edit `wrangler.toml [vars]`, then deploy |
 | New D1/R2/KV binding | Edit `wrangler.toml`, deploy |
-| Promote a user to admin | `npx wrangler d1 execute maddiehq-db --remote --command "UPDATE user SET isAdmin = 1 WHERE email = 'you@example.com'"` |
+| Promote a user to admin | `npx wrangler d1 execute coomander-db --remote --command "UPDATE user SET isAdmin = 1 WHERE email = 'you@example.com'"` |
 
 ### Sanity checks
 
 ```bash
-curl -sS https://maddiehq.oqodo.com/api/health
+curl -sS https://coomander.com/api/health
 # Expected: {"ok":true,"db":true,"auth":true,"timestamp":"..."}
 
 npx wrangler tail --format=pretty
@@ -167,7 +167,7 @@ To repro Workers-specific bugs that don't surface in `next dev`:
 ```bash
 npm run build:cf
 npm run preview:cf      # local D1 emulator on 127.0.0.1:8787
-npx wrangler d1 migrations apply maddiehq-db --local   # one-time
+npx wrangler d1 migrations apply coomander-db --local   # one-time
 ```
 
 ## Where each piece lives
@@ -183,7 +183,7 @@ npx wrangler d1 migrations apply maddiehq-db --local   # one-time
 
 ## What's already built (feature reference)
 
-**MaddieHQ is a production-ready Next.js SaaS starter.** Its entire purpose is to eliminate the infrastructure boilerplate that every web app needs. **Do not reimplement anything listed here — it is already done.**
+**Coomander is a production-ready Next.js SaaS starter.** Its entire purpose is to eliminate the infrastructure boilerplate that every web app needs. **Do not reimplement anything listed here — it is already done.**
 
 ### ⚡ Quick reference: don't build these, they're already here
 
@@ -214,8 +214,8 @@ npx wrangler d1 migrations apply maddiehq-db --local   # one-time
 | Customer-facing docs | `/docs` — Fumadocs-powered, content in `content/docs/guide/` |
 | API reference | `/api-docs` — Scalar, auto-generated from route JSDoc |
 | Dev wiki (admin) | `/admin/docs` — fumadocs-core headless, content in `content/docs/dev/` |
-| Create a new project from MaddieHQ | `/maddiehq-create` skill (Claude Code or OpenClaw) |
-| Sync MaddieHQ updates into a project | `/maddiehq-sync` skill (Claude Code or OpenClaw) |
+| Create a new project from Coomander | `/coomander-create` skill (Claude Code or OpenClaw) |
+| Sync Coomander updates into a project | `/coomander-sync` skill (Claude Code or OpenClaw) |
 | Configure OAuth providers | `/configure-sso` skill (Claude Code or OpenClaw) |
 
 ## Tech stack
@@ -600,7 +600,7 @@ export async function GET(request: Request) {
 
 ## Documentation
 
-MaddieHQ has a built-in three-tier documentation system:
+Coomander has a built-in three-tier documentation system:
 
 ### Customer-facing docs (`/docs`)
 
@@ -613,7 +613,7 @@ import { docsSource } from "@/lib/docs-source";
 
 - Sidebar navigation auto-generated from `meta.json` files
 - Built-in search via Orama at `/api/docs-search`
-- Dark mode synced with MaddieHQ theme
+- Dark mode synced with Coomander theme
 - To add a page: create `content/docs/guide/your-page.mdx` and add it to `meta.json`
 
 ### API reference (`/api-docs`)
@@ -830,11 +830,11 @@ Better Auth stores custom user fields as camelCase:
 12. Committing `.env` — always keep in `.gitignore`
 13. Missing `STRIPE_WEBHOOK_SECRET` — the webhook route will 500
 
-## Creating a new project from MaddieHQ
+## Creating a new project from Coomander
 
 ### Claude Code skill (recommended)
 
-If using Claude Code, an `/maddiehq-create` skill is included that automates the entire bootstrapping workflow:
+If using Claude Code, an `/coomander-create` skill is included that automates the entire bootstrapping workflow:
 
 1. Interviews you for project name, one-line description, target directory, and ports
 2. Copies the template (excluding .git, node_modules, build artifacts)
@@ -846,19 +846,19 @@ If using Claude Code, an `/maddiehq-create` skill is included that automates the
 
 **Install once:**
 ```bash
-cp -r /path/to/maddiehq/.claude/skills/maddiehq-create ~/.claude/skills/
+cp -r /path/to/coomander/.claude/skills/coomander-create ~/.claude/skills/
 ```
 
 Then from any directory:
 ```
-/maddiehq-create
+/coomander-create
 ```
 
-The skill file lives at `.claude/skills/maddiehq-create/SKILL.md` in this repo.
+The skill file lives at `.claude/skills/coomander-create/SKILL.md` in this repo.
 
 ### OpenClaw skill (alternative)
 
-If using OpenClaw instead of Claude Code, an equivalent `/maddiehq-create` skill is included:
+If using OpenClaw instead of Claude Code, an equivalent `/coomander-create` skill is included:
 
 **Install once:**
 ```bash
@@ -867,10 +867,10 @@ bash scripts/install-openclaw-skills.sh
 
 Then from any OpenClaw session:
 ```
-/maddiehq-create
+/coomander-create
 ```
 
-The skill file lives at `.openclaw/skills/maddiehq-create/SKILL.md` in this repo.
+The skill file lives at `.openclaw/skills/coomander-create/SKILL.md` in this repo.
 
 ### Manual setup
 
@@ -879,12 +879,12 @@ If not using Claude Code:
 ```bash
 # 1. Copy the template
 rsync -a --exclude='.git' --exclude='node_modules' --exclude='.next' --exclude='data/' \
-  ~/Kode/maddiehq/ ~/Kode/my-new-app/
+  ~/Kode/coomander/ ~/Kode/my-new-app/
 cd ~/Kode/my-new-app
 
 # 2. Update package.json name
 # 3. Create .env.local (generate BETTER_AUTH_SECRET with: openssl rand -base64 32)
-# 4. Find-and-replace "MaddieHQ"/"maddiehq" in all files
+# 4. Find-and-replace "Coomander"/"coomander" in all files
 # 5. Update ports in Dockerfile, docker-compose.yml
 # 6. Customize landing page copy
 # 7. npm install && npm run db:migrate && npm run build
@@ -898,12 +898,12 @@ cd ~/Kode/my-new-app
 | **Core config** | `package.json` | `name` field |
 | | `.env.local` (create) | Auth secret, URLs, ports, app name |
 | | `.env.example` | Default URLs and paths |
-| **Database paths** | `lib/db.ts`, `lib/auth.ts`, `scripts/migrate.ts`, `scripts/seed.ts`, `scripts/rollback.ts` | Default DATABASE_PATH (`maddiehq.db` → `slug.db`) |
+| **Database paths** | `lib/db.ts`, `lib/auth.ts`, `scripts/migrate.ts`, `scripts/seed.ts`, `scripts/rollback.ts` | Default DATABASE_PATH (`coomander.db` → `slug.db`) |
 | **App name defaults** | `lib/auth.ts`, `lib/email.ts`, `lib/mdx.ts` | APP_NAME fallback strings |
-| **Theme storage keys** | `lib/theme.tsx`, `app/layout.tsx`, `app/(protected)/app/page.tsx` | `"maddiehq-theme"` → `"slug-theme"` (4 locations) |
-| **Other storage keys** | `components/cookie-consent.tsx`, `components/onboarding.tsx` | `"maddiehq-cookie-consent"`, `"maddiehq-onboarding-completed"` |
-| **Fallback URLs** | `app/page.tsx`, `app/layout.tsx`, `app/sitemap.ts`, `app/robots.ts`, `app/feed.xml/route.ts` | `"maddiehq.dev"` → your domain |
-| **Export filenames** | `app/settings/page.tsx`, `app/api/settings/export/route.ts` | `"maddiehq-export-"` prefix |
+| **Theme storage keys** | `lib/theme.tsx`, `app/layout.tsx`, `app/(protected)/app/page.tsx` | `"coomander-theme"` → `"slug-theme"` (4 locations) |
+| **Other storage keys** | `components/cookie-consent.tsx`, `components/onboarding.tsx` | `"coomander-cookie-consent"`, `"coomander-onboarding-completed"` |
+| **Fallback URLs** | `app/page.tsx`, `app/layout.tsx`, `app/sitemap.ts`, `app/robots.ts`, `app/feed.xml/route.ts` | `"coomander.dev"` → your domain |
+| **Export filenames** | `app/settings/page.tsx`, `app/api/settings/export/route.ts` | `"coomander-export-"` prefix |
 | **Landing page** | `app/page.tsx` | All copy: hero, features, pricing, FAQ, testimonials, footer, JSON-LD |
 | | `components/landing/header.tsx` | Logo text |
 | | `components/landing/faq.tsx` | FAQ content |
@@ -914,7 +914,7 @@ cd ~/Kode/my-new-app
 | **Legal pages** | `app/privacy-policy/page.tsx`, `app/terms/page.tsx` | Header brand, metadata |
 | **Docker** | `docker-compose.yml`, `Dockerfile` | Container names, ports, volume names, DATABASE_PATH |
 | **Content** | `content/changelog/`, `content/blog/` | Reset changelog, remove example posts |
-| **Docs** | `PROJECT.md`, `AGENTS.md`, `CLAUDE.md`, `docs/DEPLOYMENT.md` | MaddieHQ → your app name |
+| **Docs** | `PROJECT.md`, `AGENTS.md`, `CLAUDE.md`, `docs/DEPLOYMENT.md` | Coomander → your app name |
 | **Tests** | `e2e/auth.spec.ts` | Title assertions |
 
 ## Extending the template
@@ -952,7 +952,7 @@ The five built-in SSO providers each require different steps to obtain credentia
 
 Install once:
 ```bash
-cp -r /path/to/maddiehq/.claude/skills/configure-sso ~/.claude/skills/
+cp -r /path/to/coomander/.claude/skills/configure-sso ~/.claude/skills/
 ```
 
 Then from any downstream project:
@@ -980,48 +980,48 @@ Use `registerCommand()` from `@/lib/commands` inside a `useEffect` in any compon
 ### Adding a blog post
 Create `content/blog/your-slug.mdx` with the required frontmatter fields.
 
-## Syncing updates from MaddieHQ into a downstream project
+## Syncing updates from Coomander into a downstream project
 
-MaddieHQ is a **template, not a library** — there's no `npm update` to pull in new features. When MaddieHQ ships improvements (new components, security fixes, better patterns), downstream projects need to port them manually. Here's the recommended agent workflow.
+Coomander is a **template, not a library** — there's no `npm update` to pull in new features. When Coomander ships improvements (new components, security fixes, better patterns), downstream projects need to port them manually. Here's the recommended agent workflow.
 
 ### When to sync
 
-Check MaddieHQ for updates when:
+Check Coomander for updates when:
 - Starting a significant new feature (make sure you're not about to reinvent something)
-- MaddieHQ has shipped a new phase of work (check `/changelog` or `content/changelog/changelog.mdx`)
+- Coomander has shipped a new phase of work (check `/changelog` or `content/changelog/changelog.mdx`)
 - You notice a pattern in your project that feels like solved infrastructure
 
 ### Claude Code skill (recommended)
 
-If using Claude Code, an `/maddiehq-sync` skill is included in this repo that automates the entire workflow below — parallel exploration, diff, interactive checklist, GH issue creation, and branch setup.
+If using Claude Code, an `/coomander-sync` skill is included in this repo that automates the entire workflow below — parallel exploration, diff, interactive checklist, GH issue creation, and branch setup.
 
 **Install once:**
 ```bash
-cp -r /path/to/maddiehq/.claude/skills/maddiehq-sync ~/.claude/skills/
+cp -r /path/to/coomander/.claude/skills/coomander-sync ~/.claude/skills/
 ```
 
 Then from any downstream project:
 ```
-/maddiehq-sync
+/coomander-sync
 ```
 
-The skill file lives at `.claude/skills/maddiehq-sync/SKILL.md` in this repo.
+The skill file lives at `.claude/skills/coomander-sync/SKILL.md` in this repo.
 
-**OpenClaw alternative:** Run `bash scripts/install-openclaw-skills.sh` once, then use `/maddiehq-sync` from any OpenClaw session. The skill lives at `.openclaw/skills/maddiehq-sync/SKILL.md`.
+**OpenClaw alternative:** Run `bash scripts/install-openclaw-skills.sh` once, then use `/coomander-sync` from any OpenClaw session. The skill lives at `.openclaw/skills/coomander-sync/SKILL.md`.
 
 ### Manual agent workflow
 
-If not using Claude Code, run two exploration agents in parallel — one on MaddieHQ, one on your project — then diff and port:
+If not using Claude Code, run two exploration agents in parallel — one on Coomander, one on your project — then diff and port:
 
 ```
 Step 1: Explore both repos simultaneously
-  Agent A: Map everything in MaddieHQ (lib/, components/, app/, migrations/)
+  Agent A: Map everything in Coomander (lib/, components/, app/, migrations/)
   Agent B: Map the current state of the downstream project (same directories)
 
 Step 2: Diff the two inventories
-  - What exists in MaddieHQ that doesn't exist in the project?
-  - What exists in both but MaddieHQ's version is meaningfully better?
-  - What MaddieHQ features are irrelevant to this project? (skip those)
+  - What exists in Coomander that doesn't exist in the project?
+  - What exists in both but Coomander's version is meaningfully better?
+  - What Coomander features are irrelevant to this project? (skip those)
 
 Step 3: Create a GH issue outlining the sync work
   - List each item to port with a brief rationale
@@ -1049,17 +1049,17 @@ Step 4: Create a branch + PR, implement the ports one at a time
 | Auth system | ⚠️ Careful | If already custom auth, migration is a significant undertaking |
 | DB migrations | ⚠️ Adapt | Port the pattern, not the schema — your tables will differ |
 
-### What to check in MaddieHQ
+### What to check in Coomander
 
 - **`README.md`** (this file) — authoritative list of what's been built
 - **`content/changelog/changelog.mdx`** — versioned history of changes
 - **`/changelog`** — rendered changelog page
-- **GitHub commits/PRs** — `git log --oneline` on the MaddieHQ repo for recent work
+- **GitHub commits/PRs** — `git log --oneline` on the Coomander repo for recent work
 
 ### Adapting rather than copy-pasting
 
-Most MaddieHQ code ports cleanly, but watch for:
-- **Table/column names** — MaddieHQ uses `user(id)` and camelCase custom fields. If your project predates Better Auth, schema mapping may be needed.
-- **Environment variable names** — MaddieHQ uses `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`. Older projects may use `JWT_SECRET`, `APP_URL`, etc.
-- **Import paths** — MaddieHQ uses `@/lib/...` and `@/components/...`. Verify your `tsconfig.json` `paths` match.
-- **Tailwind version** — MaddieHQ uses Tailwind v4. Projects on v3 will need to adapt class names and the config format.
+Most Coomander code ports cleanly, but watch for:
+- **Table/column names** — Coomander uses `user(id)` and camelCase custom fields. If your project predates Better Auth, schema mapping may be needed.
+- **Environment variable names** — Coomander uses `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`. Older projects may use `JWT_SECRET`, `APP_URL`, etc.
+- **Import paths** — Coomander uses `@/lib/...` and `@/components/...`. Verify your `tsconfig.json` `paths` match.
+- **Tailwind version** — Coomander uses Tailwind v4. Projects on v3 will need to adapt class names and the config format.

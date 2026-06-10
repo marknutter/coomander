@@ -2,9 +2,9 @@
  * Outbound Telegram send for Coomander (#151, milestone 1).
  *
  * Ported from ~/Code/geology/web/node/lib/geology/telegram.ts, adapted for
- * MaddieHQ's multi-tenant model: the caller passes the destination `chatId`
+ * Coomander's multi-tenant model: the caller passes the destination `chatId`
  * (resolved from each user's `telegramChatId` row), and the bot token is the
- * MaddieHQ-dedicated `MADDIE_TELEGRAM_BOT_TOKEN`.
+ * Coomander-dedicated `MADDIE_TELEGRAM_BOT_TOKEN`.
  *
  * Posts directly to the Bot API so it works from a Cloudflare Worker or Node
  * route with no MCP dependency. Never throws: returns a status object so the
@@ -12,7 +12,7 @@
  *
  * IMPORTANT — difference from geology: geology suppresses all outbound Telegram
  * whenever NODE_ENV != production, to avoid the dev server posting into the prod
- * bot thread (it shares one bot across environments). MaddieHQ uses a DEDICATED
+ * bot thread (it shares one bot across environments). Coomander uses a DEDICATED
  * bot (@coomander_bot), so there is no shared-thread hazard, and milestone 1's
  * whole point is to verify an end-to-end send from the DEV environment. So this
  * does NOT suppress in dev. `COOMANDER_TELEGRAM_DISABLED` is an explicit opt-out
@@ -37,7 +37,7 @@ function flagSet(v: string | undefined): boolean | null {
 
 /**
  * Whether outbound Telegram is suppressed. Default: ENABLED everywhere (incl.
- * dev), because the bot is MaddieHQ-dedicated. Only an explicit
+ * dev), because the bot is Coomander-dedicated. Only an explicit
  * COOMANDER_TELEGRAM_DISABLED=1 turns it off.
  */
 function telegramDisabled(): boolean {

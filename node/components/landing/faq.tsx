@@ -11,14 +11,14 @@ interface FaqItem {
 
 const faqs: FaqItem[] = [
   {
-    question: "What does MaddieHQ actually do?",
+    question: "What does Coomander actually do?",
     answer:
-      "MaddieHQ pulls your Instagram posts and audience data, runs each post through Claude vision and caption parsing, transcribes your reels (Pro), and then joins it all to your performance data to surface the patterns that actually predict engagement — with strategist-grade explanations you can act on.",
+      "Coomander pulls your Instagram posts and audience data, runs each post through Claude vision and caption parsing, transcribes your reels (Pro), and then joins it all to your performance data to surface the patterns that actually predict engagement — with strategist-grade explanations you can act on.",
   },
   {
     question: "Is my Instagram data safe?",
     answer:
-      "MaddieHQ connects with read-only OAuth permissions — it can see your posts, audience demographics, and Instagram-provided insights, but it can't post, message, or change anything. Your data is stored per-user in our database and never used to train any model.",
+      "Coomander connects with read-only OAuth permissions — it can see your posts, audience demographics, and Instagram-provided insights, but it can't post, message, or change anything. Your data is stored per-user in our database and never used to train any model.",
   },
   {
     question: "Which Instagram accounts work?",
@@ -28,7 +28,7 @@ const faqs: FaqItem[] = [
   {
     question: "How is this different from Instagram's own analytics?",
     answer:
-      "Instagram tells you the numbers. MaddieHQ tells you why. The native dashboard shows reach and impressions in isolation — MaddieHQ cross-references visual style, hook type, caption tone, on-camera energy, and audience demographics to show you the combinations that actually drive saves and shares.",
+      "Instagram tells you the numbers. Coomander tells you why. The native dashboard shows reach and impressions in isolation — Coomander cross-references visual style, hook type, caption tone, on-camera energy, and audience demographics to show you the combinations that actually drive saves and shares.",
   },
   {
     question: "What's the difference between Free and Pro?",
@@ -43,7 +43,7 @@ const faqs: FaqItem[] = [
   {
     question: "Will you support other platforms?",
     answer:
-      "Yes — TikTok and Reddit are on the roadmap. Pro subscribers get early access. We're building MaddieHQ one platform at a time so each integration is actually deep instead of broadly shallow.",
+      "Yes — TikTok and Reddit are on the roadmap. Pro subscribers get early access. We're building Coomander one platform at a time so each integration is actually deep instead of broadly shallow.",
   },
   {
     question: "Can I cancel any time?",

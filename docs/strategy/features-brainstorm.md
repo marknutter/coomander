@@ -1,21 +1,21 @@
-# MaddieHQ — Features Brainstorm
+# Coomander — Features Brainstorm
 
 **Date:** 2026-05-13
 **Status:** Working strategy document. Opinionated. Not implemented unless tracked in a GH issue.
 **Target audience:** Influencers / content creators, with a sharp lens on **OnlyFans-funnel creators** who use Instagram as a top-of-funnel for paid OF subscriptions.
-**Today's MaddieHQ:** Instagram OAuth + sync; per-post analytics (reach / impressions / saves / shares / likes / comments); audience demographics; AI image + caption analysis (Claude); video transcription (Whisper) + 5-frame key-frame analysis (Claude vision); pattern detection + pattern deep-dives.
+**Today's Coomander:** Instagram OAuth + sync; per-post analytics (reach / impressions / saves / shares / likes / comments); audience demographics; AI image + caption analysis (Claude); video transcription (Whisper) + 5-frame key-frame analysis (Claude vision); pattern detection + pattern deep-dives.
 
 ---
 
 ## Executive summary
 
-1. **The IG-analytics-tool market is a commodity** (Hootsuite, Vista Social, Later, Predis.ai). MaddieHQ is *already* differentiated against them because we cross-reference visual + caption + engagement at the post level, not as separate dashboards.
+1. **The IG-analytics-tool market is a commodity** (Hootsuite, Vista Social, Later, Predis.ai). Coomander is *already* differentiated against them because we cross-reference visual + caption + engagement at the post level, not as separate dashboards.
 2. **The real money is in the OF segment.** OF agencies pay $40–$60/creator/month for Infloww / Supercreator / Creator Hero just for chat CRM + mass DM. Top creators bring in 60%+ of revenue from PPV — that's an entirely separate workflow no IG analytics tool touches. ([Infloww pricing](https://infloww.com/onlyfans-crm-enterprise), [influencermarketinghub.com](https://influencermarketinghub.com/onlyfans-monetization/))
 3. **The flywheel we should own:** *Instagram reach → DM intent capture → OF subscription → PPV value-ladder.* Today every tool covers exactly one of these stages. Whoever covers the joins owns the creator.
-4. **MaddieHQ's unfair advantage is the visual+language+performance triangulation we already do.** Extending that to (a) predict *next-post* performance, (b) auto-draft the next reel concept, and (c) write the DM/PPV copy that mirrors the creator's voice would beat every adjacent tool on insight depth.
+4. **Coomander's unfair advantage is the visual+language+performance triangulation we already do.** Extending that to (a) predict *next-post* performance, (b) auto-draft the next reel concept, and (c) write the DM/PPV copy that mirrors the creator's voice would beat every adjacent tool on insight depth.
 5. **AI video generation is hitting "good enough"** for B-roll, faceless content, and even creator avatar dubbing (Veo 3.1, Pika 2.5, ElevenLabs voice clones), but **OF's 2026 policy update bans deepfakes** and requires `#AI`/`#AIGenerated` disclosure on any AI content depicting the creator. ([OF AI policy](https://list25.com/onlyfans-2026-policy-updates-ai-deepfake-ban-verification/), [sirency.com](https://www.sirency.com/blog/onlyfans-policy-updates-2026-ai-deepfakes-and-compliance-rules)) Generative video features need to be designed around this — own-likeness, verified, labeled.
-6. **Comment-to-DM is the single biggest growth lever on Instagram for OF creators.** ManyChat, Inro, Creatorflow already do this; the conversion-rate uplift over manual is 25–40% → 8–15% baseline. ([creatorflow.so](https://creatorflow.so/blog/instagram-dm-automation-tools-comparison-2026/)) MaddieHQ should ship comment-to-DM with **voice-mirrored copy** powered by RAG over the creator's caption history — neither side currently combines those.
-7. **Vault management is the unspoken bottleneck.** OF agencies waste tens of thousands per month on it. ([ofauditor.app](https://ofauditor.app/blog/vault-management.html)) MaddieHQ can index the same key-frame metadata it already extracts for IG into a unified content vault that recommends *which* old PPV to resend to *which* fan segment.
+6. **Comment-to-DM is the single biggest growth lever on Instagram for OF creators.** ManyChat, Inro, Creatorflow already do this; the conversion-rate uplift over manual is 25–40% → 8–15% baseline. ([creatorflow.so](https://creatorflow.so/blog/instagram-dm-automation-tools-comparison-2026/)) Coomander should ship comment-to-DM with **voice-mirrored copy** powered by RAG over the creator's caption history — neither side currently combines those.
+7. **Vault management is the unspoken bottleneck.** OF agencies waste tens of thousands per month on it. ([ofauditor.app](https://ofauditor.app/blog/vault-management.html)) Coomander can index the same key-frame metadata it already extracts for IG into a unified content vault that recommends *which* old PPV to resend to *which* fan segment.
 8. **Platform-policy and rate-limit constraints define what we can ship:** Instagram Graph API is 200 calls/account/hour; `instagram_manage_insights` only returns demographics for the authed account owner; cold DMs are forbidden — only response to user-initiated interaction. ([creatorflow.so rate limits](https://creatorflow.so/blog/instagram-api-rate-limits-explained/), [getphyllo.com](https://www.getphyllo.com/post/instagram-api-integration-101-for-developers-of-the-creator-economy)) Don't build anything that needs to break these.
 9. **The three differentiators I'd commit to:** (a) **closed-loop optimization** — every recommendation we make is measured against the post that ships from it; (b) **creator-voice fidelity** — every piece of generated copy is auto-graded against the creator's caption corpus before being shown; (c) **funnel-aware analytics** — every IG metric is annotated with downstream OF conversion signal where we can get it.
 10. **Don't try to be Infloww.** Building an OF chat-CRM means scraping OnlyFans' web UI (ToS-grey), running mass-DM agents (risky), and competing with established players. *Sit one layer above them:* be the intelligence layer they all integrate with via API.
@@ -24,11 +24,11 @@
 
 ## 1 — Competitive landscape
 
-This isn't exhaustive; it's the bands MaddieHQ needs to know cold. Pricing is creator-tier where available; agency tiers are noted separately.
+This isn't exhaustive; it's the bands Coomander needs to know cold. Pricing is creator-tier where available; agency tiers are noted separately.
 
 ### 1.1 OnlyFans-native CRMs and chat tools
 
-| Tool | What it actually does | Pricing | Differentiator | Gap MaddieHQ can exploit |
+| Tool | What it actually does | Pricing | Differentiator | Gap Coomander can exploit |
 |---|---|---|---|---|
 | **Infloww** | OnlyFans CRM: unified inbox (40% faster chat), Smart Lists subscriber segmentation, Vault Pro content organization, mass DM, auto-messaging, sensitive-word blocker, per-creator dedicated IPs | $40/creator/mo OF, $50/mo Fansly; <$500 earners only at base tier ([infloww](https://infloww.com/onlyfans-crm-enterprise)) | "Agency-grade" — ops focus, not creator focus | Zero IG-side intelligence. No "what to send next" — only "send it faster." |
 | **Supercreator** | OnlyFans CRM + **Izzy** (AI chatter), unified inbox, mass DM, vault, analytics | Paid (creator + agency tiers); freemium for the AI video app side ([supercreator.app](https://www.supercreator.app/pricing)) | Strongest AI-chatter in the space (response generation, follow-ups, "creator stays in control") | The chatter doesn't know the *fan*'s relationship to the *creator's* IG presence. We can supply that signal. |
@@ -38,7 +38,7 @@ This isn't exhaustive; it's the bands MaddieHQ needs to know cold. Pricing is cr
 
 ### 1.2 Mainstream IG analytics / scheduling
 
-| Tool | Offering | Pricing | Why creators leave | MaddieHQ angle |
+| Tool | Offering | Pricing | Why creators leave | Coomander angle |
 |---|---|---|---|---|
 | **Hootsuite** | Enterprise scheduling, analytics, social listening, ad mgmt, CRM integrations | $99+/mo ([capterra](https://www.capterra.com/compare/121701-239366/HootSuite-vs-Vista-Social)) | Built for teams, not creators. Expensive, complex. | Wrong audience entirely. |
 | **Vista Social** | 13+ network scheduling, unified inbox, analytics across 5 categories, competitor analysis, review mgmt | Lower mid-range; analytics in all tiers ([vistasocial](https://vistasocial.com/insights/vista-social-vs-hootsuite/)) | Solid breadth, shallow depth on any one platform | We go deeper on IG visual analysis than they ever will. |
@@ -72,7 +72,7 @@ This isn't exhaustive; it's the bands MaddieHQ needs to know cold. Pricing is cr
 
 ### 1.6 What's missing in the market
 
-Reading across all of this: **nobody owns the join between IG signal and OF revenue.** Infloww knows your top PPV buyers but not which IG post drove them in. ManyChat fires the DM but doesn't write copy in your voice. Captions makes a beautiful clip but doesn't know it'll bomb on *your* audience. **MaddieHQ has the right substrate (post-level visual+caption+performance) to be the brain that sits above all of them.**
+Reading across all of this: **nobody owns the join between IG signal and OF revenue.** Infloww knows your top PPV buyers but not which IG post drove them in. ManyChat fires the DM but doesn't write copy in your voice. Captions makes a beautiful clip but doesn't know it'll bomb on *your* audience. **Coomander has the right substrate (post-level visual+caption+performance) to be the brain that sits above all of them.**
 
 ---
 
@@ -97,7 +97,7 @@ Grouped by **the goal it serves**, not by AI primitive. For each: what it does, 
 10. **Caption + spoken-hook co-writer.** Side-by-side editor: type the caption, it generates 3 matching spoken hooks (transcribed-style) for the reel voiceover, OR transcribe the spoken hook from a draft and generate the caption that converts viewers from it. *Primitive:* Whisper + Claude. *Why pay:* tightening the caption-to-hook coherence is the single biggest underutilized lever.
 11. **Voice-cloned dub for repurposing.** Take a top-performing reel, dub in 28+ languages via ElevenLabs ([elevenlabs](https://elevenlabs.io/voice-cloning)), preserve creator voice; recommend which markets to ship to based on demographics. *Primitive:* ElevenLabs API + creator demographic targeting. *Why pay:* one viral reel → 5 markets without re-shooting. *Competitor:* Captions does dubbing but doesn't recommend markets.
 12. **Auto-clip from livestreams or long-form.** Same as OpusClip but trained on the creator's own engagement signal — pick clips that match the moments that historically drove saves. *Primitive:* whisper transcripts + per-creator save-density model. *Why pay:* most creators don't go live because they don't know how to chop it.
-13. **One-tap content recycler.** For each "evergreen" post (defined as: top-25%-saves, posted ≥90 days ago, ≤10% follower overlap with current followers), generate a "remix" variant — same shot framing, new caption + new opening line — to repost. *Primitive:* MaddieHQ analysis library + Claude.
+13. **One-tap content recycler.** For each "evergreen" post (defined as: top-25%-saves, posted ≥90 days ago, ≤10% follower overlap with current followers), generate a "remix" variant — same shot framing, new caption + new opening line — to repost. *Primitive:* Coomander analysis library + Claude.
 
 ### 2.3 Conversion — IG follower → OF subscriber
 
@@ -118,7 +118,7 @@ Grouped by **the goal it serves**, not by AI primitive. For each: what it does, 
 22. **Competitor pattern reverse-engineering.** Creator pastes 3 competitor IG handles; we (within IG's API constraints, public-content-only) analyze their public-feed posts and identify patterns *they* are using that the creator isn't. *Primitive:* IG Business Discovery API + same analysis pipeline applied to non-auth'd accounts. ([Phyllo](https://www.getphyllo.com/post/instagram-api-integration-101-for-developers-of-the-creator-economy)) *Why pay:* "what is my competitor doing right" is the universal question; nobody answers it with vision-level analysis.
 23. **Trend-aware reel concept.** Cross-reference the creator's top-pattern templates with currently-trending audio + visual motifs (scraped from TikTok/Reels trending). *Primitive:* trends scrape + Claude pattern-matcher. *Why pay:* "ride the trend in *your* style". *Competitor:* none integrating trend awareness with creator-specific style.
 24. **Time-of-week heatmap with cohort weighting.** Not "post at 7pm" — post at "the time your top-decile-engagement cohort is on" weighted by follower active hours. *Primitive:* IG insights snapshots. *Why pay:* concrete, defensible posting cadence.
-25. **Pattern explainer in plain English.** Already exists in MaddieHQ (the elaborate endpoint). Lean into it harder: surface elaborations on the daily/weekly digest, not just on click. *Primitive:* Claude. *Why pay:* the difference between "data" and "advice."
+25. **Pattern explainer in plain English.** Already exists in Coomander (the elaborate endpoint). Lean into it harder: surface elaborations on the daily/weekly digest, not just on click. *Primitive:* Claude. *Why pay:* the difference between "data" and "advice."
 
 ---
 
@@ -126,14 +126,14 @@ Grouped by **the goal it serves**, not by AI primitive. For each: what it does, 
 
 The IG → OF flywheel is the single largest creator-economy revenue engine on the planet ([influencermarketinghub](https://influencermarketinghub.com/onlyfans-monetization/)) and it's structurally underserved by tooling. Stages:
 
-1. **Top of funnel — IG reach.** Creator posts; the algorithm decides who sees it. The IG-side levers are visual quality, caption hook, hashtag use, posting cadence, video watch-time. MaddieHQ already analyzes all of these.
-2. **Intent capture — DM / Story reply / saved post.** Highest-intent signal on IG is a story reply, then a DM, then a save, then a share, then a like. MaddieHQ today does not surface intent signals; it should.
+1. **Top of funnel — IG reach.** Creator posts; the algorithm decides who sees it. The IG-side levers are visual quality, caption hook, hashtag use, posting cadence, video watch-time. Coomander already analyzes all of these.
+2. **Intent capture — DM / Story reply / saved post.** Highest-intent signal on IG is a story reply, then a DM, then a save, then a share, then a like. Coomander today does not surface intent signals; it should.
 3. **Off-platform redirect — link-in-bio.** A bio link aggregator (Beacons, AllMyLinks — never Linktree for adult creators ([theleap](https://www.theleap.co/blog/beacons-vs-snipfeed/))). UTM tracking is critical here.
 4. **OF subscription decision.** Free preview content, price anchoring, "free month" promo are the main levers; the creator-facing tooling is split between OF native and the CRMs.
 5. **PPV value-ladder.** Welcome message + first PPV in 48h is the canonical pattern ([thewebaddicted](https://thewebaddicted.com/blog/onlyfans-ppv-explained/)). Top creators do hybrid: ~55% of posts on the wall, rest gated as PPV ([pseudoface](https://www.pseudoface.com/guides/start-here/profile-setup/onlyfans-wall-vs-ppv-value-ladder)).
 6. **Retention — re-engagement, custom content, vault recycling.** OF vault management is the unspoken bottleneck — top operators tag content by type/mood/length/season and recycle ([ofauditor](https://ofauditor.app/blog/vault-management.html)).
 
-### What MaddieHQ can uniquely do across stages
+### What Coomander can uniquely do across stages
 
 - **Cross-stage attribution** — connect "IG post X drove 47 bio-link clicks → 12 OF subs → $340 in first-48h PPV." No other tool has this view because none span IG + bio-link + OF.
 - **Tag the vault using the same metadata we already extract for IG analysis.** Setting / lighting / face / energy / pose / scene-change — the OF vault and IG post DB share the same schema. A creator's "post-OF-shoot" content stream becomes searchable, recommendable, and recyclable using infrastructure we already have.
@@ -154,7 +154,7 @@ Of all the features above, **pick a small number and commit hard.** I'd choose 4
 
 ### 4.1 "We close the loop"
 
-Every recommendation MaddieHQ makes (next-post predictor, hashtag A/B, top-performer cloner, vault recommender) is **tracked back to the post or DM that ships from it.** A creator's dashboard shows "we suggested X, you shipped Y, here's what happened." That measurement loop is the foundation of every other moat.
+Every recommendation Coomander makes (next-post predictor, hashtag A/B, top-performer cloner, vault recommender) is **tracked back to the post or DM that ships from it.** A creator's dashboard shows "we suggested X, you shipped Y, here's what happened." That measurement loop is the foundation of every other moat.
 
 **Tradeoff:** Slower feature shipping; every recommendation needs an outcome-tracking schema. **Worth it:** it's the only way to credibly beat OpusClip's per-clip virality score with per-creator virality score.
 
@@ -203,7 +203,7 @@ The platforms in this stack have heavy 2026 policy enforcement. Build features i
 - **Deepfakes of real people = permanent ban** ([list25](https://list25.com/onlyfans-2026-policy-updates-ai-deepfake-ban-verification/)).
 - **AI content depicting the creator** must be labeled `#AI` or `#AIGenerated` ([sirency](https://www.sirency.com/blog/onlyfans-policy-updates-2026-ai-deepfakes-and-compliance-rules)). Build this into our caption generator as a hard-coded prefix on any AI-image-driven post.
 - **AI enhancement of real creator content is OK** — sharpen, lighting, smoothing, dubbing in own-voice — as long as it's the creator's verified likeness.
-- **Geo-compliance + age-verification tightening** is rolling out in 2026 ([list25](https://list25.com/onlyfans-2026-policy-updates-ai-deepfake-ban-verification/)). Out of scope for MaddieHQ; just don't make features that complicate it.
+- **Geo-compliance + age-verification tightening** is rolling out in 2026 ([list25](https://list25.com/onlyfans-2026-policy-updates-ai-deepfake-ban-verification/)). Out of scope for Coomander; just don't make features that complicate it.
 
 ### 5.3 ElevenLabs / voice cloning
 

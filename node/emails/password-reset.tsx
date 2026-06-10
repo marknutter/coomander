@@ -10,7 +10,7 @@ interface PasswordResetEmailProps {
 }
 
 export default function PasswordResetEmail({
-  appName = "MaddieHQ",
+  appName = "Coomander",
   appUrl = "https://YOUR_DOMAIN",
   resetUrl = "https://YOUR_DOMAIN/reset",
 }: PasswordResetEmailProps) {

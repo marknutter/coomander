@@ -4,7 +4,7 @@
  */
 const Database = require("better-sqlite3");
 
-const dbPath = process.env.DATABASE_PATH || "./data/maddiehq.db";
+const dbPath = process.env.DATABASE_PATH || "./data/coomander.db";
 const db = new Database(dbPath);
 
 // Better Auth complete schema (v1.4+)

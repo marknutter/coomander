@@ -91,7 +91,7 @@ describe("WelcomeEmail", () => {
 
   it("uses default appName when none provided", async () => {
     const html = await render(React.createElement(WelcomeEmail));
-    expect(html).toContain("MaddieHQ");
+    expect(html).toContain("Coomander");
   });
 
   it("links CTA to /app path", async () => {

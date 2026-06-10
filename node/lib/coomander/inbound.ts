@@ -168,7 +168,7 @@ function contextString(ctx: InboundContext): string {
 }
 
 function systemPrompt(ctx: InboundContext, personaMode: PersonaMode, today: string): string {
-  return `You are Coomander, the AI operations manager inside MaddieHQ (an OnlyFans creator app). Today is ${today}. Turn the creator's Telegram message into exactly one tool call. ${
+  return `You are Coomander, the AI operations manager inside Coomander (an OnlyFans creator app). Today is ${today}. Turn the creator's Telegram message into exactly one tool call. ${
     personaMode === "operational" ? "Be terse." : "Be warm and direct."
   }
 

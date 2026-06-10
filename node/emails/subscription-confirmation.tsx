@@ -11,7 +11,7 @@ interface SubscriptionConfirmationEmailProps {
 }
 
 export default function SubscriptionConfirmationEmail({
-  appName = "MaddieHQ",
+  appName = "Coomander",
   appUrl = "https://YOUR_DOMAIN",
   plan = "Pro",
   unsubscribeUrl,

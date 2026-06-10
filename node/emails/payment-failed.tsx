@@ -10,7 +10,7 @@ interface PaymentFailedEmailProps {
 }
 
 export default function PaymentFailedEmail({
-  appName = "MaddieHQ",
+  appName = "Coomander",
   appUrl = "https://YOUR_DOMAIN",
   unsubscribeUrl,
 }: PaymentFailedEmailProps) {

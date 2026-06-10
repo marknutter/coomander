@@ -13,7 +13,7 @@ import { getDb } from "./db";
 import { user as userTable } from "./schema";
 import * as authDrizzleSchema from "./schema.auth";
 
-const appName = process.env.APP_NAME || "MaddieHQ";
+const appName = process.env.APP_NAME || "Coomander";
 
 // ─── Lazy auth initialization ──────────────────────────────────────────────
 //
@@ -64,7 +64,7 @@ function buildAuthDatabase(): Parameters<typeof betterAuth>[0]["database"] {
   // SQLite: better-sqlite3, lazily required so the static-import chain on
   // Workers doesn't pull in the native binding (matches the lib/db.ts
   // pattern from #290).
-  const dbPath = process.env.DATABASE_PATH || "./data/maddiehq.db";
+  const dbPath = process.env.DATABASE_PATH || "./data/coomander.db";
   const dir = path.dirname(dbPath);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });

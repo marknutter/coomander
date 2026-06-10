@@ -8,7 +8,7 @@ import { mdxComponents } from "@/components/mdx-components";
 
 export const metadata: Metadata = {
   title: "Changelog",
-  description: "See what's new in MaddieHQ — features, improvements, and fixes.",
+  description: "See what's new in Coomander — features, improvements, and fixes.",
 };
 
 export default function ChangelogPage() {
@@ -22,7 +22,7 @@ export default function ChangelogPage() {
           <Link href="/" className="flex items-center gap-2 group">
             <Sprout className="w-5 h-5 text-primary group-hover:scale-110 transition-transform" />
             <span className="font-bold text-gray-900 dark:text-gray-100">
-              MaddieHQ
+              Coomander
             </span>
           </Link>
           <nav className="flex items-center gap-4 text-sm">
@@ -49,7 +49,7 @@ export default function ChangelogPage() {
             Changelog
           </h1>
           <p className="text-lg text-gray-500 dark:text-gray-400 max-w-lg mx-auto">
-            See what&apos;s new in MaddieHQ — features, improvements, and fixes.
+            See what&apos;s new in Coomander — features, improvements, and fixes.
           </p>
         </div>
       </section>
@@ -77,7 +77,7 @@ export default function ChangelogPage() {
           href="/"
           className="text-sm text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400 transition-colors"
         >
-          &larr; Back to MaddieHQ
+          &larr; Back to Coomander
         </Link>
       </footer>
     </div>

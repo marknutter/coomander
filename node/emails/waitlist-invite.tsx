@@ -11,7 +11,7 @@ interface WaitlistInviteEmailProps {
 }
 
 export default function WaitlistInviteEmail({
-  appName = "MaddieHQ",
+  appName = "Coomander",
   appUrl = "https://YOUR_DOMAIN",
   inviteCode = "ABC123",
   unsubscribeUrl,

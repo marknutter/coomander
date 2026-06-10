@@ -15,7 +15,7 @@ import Database from "better-sqlite3";
 import path from "path";
 import fs from "fs";
 
-const dbPath = process.env.DATABASE_PATH || "./data/maddiehq.db";
+const dbPath = process.env.DATABASE_PATH || "./data/coomander.db";
 const dir = path.dirname(dbPath);
 if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 

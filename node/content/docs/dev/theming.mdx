@@ -1,9 +1,9 @@
 ---
 title: Theming
-description: How MaddieHQ's semantic token system works, how to swap brand colors, and how to add your own theme.
+description: How Coomander's semantic token system works, how to swap brand colors, and how to add your own theme.
 ---
 
-MaddieHQ uses a **semantic token system** built on Tailwind v4 and CSS variables. You style components with intent-based classes (`bg-primary`, `text-muted-foreground`, `border-border`) rather than hardcoded color scales (`bg-emerald-600`, `text-gray-500`). That gives you three things for free:
+Coomander uses a **semantic token system** built on Tailwind v4 and CSS variables. You style components with intent-based classes (`bg-primary`, `text-muted-foreground`, `border-border`) rather than hardcoded color scales (`bg-emerald-600`, `text-gray-500`). That gives you three things for free:
 
 1. **Brand swap in one line** — change `--primary` in one CSS block and the whole app recolors.
 2. **Light/dark parity** — every token has a paired value for light and dark mode, wired automatically.
@@ -72,7 +72,7 @@ You never need to write `dark:` variants when using semantic tokens — the swap
 
 ## How to swap the brand color
 
-MaddieHQ ships with three reference themes: `emerald` (default), `indigo`, and `rose`. To try one, open devtools and set the `data-theme` attribute on `<html>`:
+Coomander ships with three reference themes: `emerald` (default), `indigo`, and `rose`. To try one, open devtools and set the `data-theme` attribute on `<html>`:
 
 ```html
 <html data-theme="indigo">
@@ -119,7 +119,7 @@ This is intentionally **not** wired up in the template — most downstream proje
 
 ## Downstream customization
 
-If you're using MaddieHQ as a template for your own product:
+If you're using Coomander as a template for your own product:
 
 1. **The lazy path** — change the `--primary`, `--accent`, `--accent-foreground`, and `--ring` values in `:root` and `.dark` inside `globals.css`. That's it. Everywhere in the app that uses `bg-primary`, `text-primary`, etc. will update.
 2. **The thorough path** — also update `--success`, `--warning`, `--info` if your brand has specific semantic color values, and review `--secondary` / `--muted` if you want warmer or cooler neutrals.
@@ -169,7 +169,7 @@ The legacy `@/lib/cn` import path still works (it re-exports from `@/lib/utils`)
 
 ## How to migrate to shadcn primitives (downstream guide)
 
-If you're maintaining a downstream project created from MaddieHQ *before* April 2026 and you want to adopt the shadcn primitives:
+If you're maintaining a downstream project created from Coomander *before* April 2026 and you want to adopt the shadcn primitives:
 
 1. **Pull the new deps.** 15 packages: `class-variance-authority`, `clsx`, `tailwind-merge`, `tw-animate-css`, `sonner`, `cmdk`, plus `@radix-ui/react-dialog`, `react-dropdown-menu`, `react-tabs`, `react-popover`, `react-tooltip`, `react-select`, `react-alert-dialog`, `react-slot`. Pin all of them to exact versions per the dependency rules.
 2. **Pull the new files.** Copy `lib/utils.ts`, `components.json`, and all the new primitive files in `components/ui/` (`dialog.tsx`, `sonner.tsx`, `command.tsx`, `popover.tsx`, `tooltip.tsx`, `select.tsx`, `alert-dialog.tsx`). Also copy the *refactored* versions of `modal.tsx`, `dropdown-menu.tsx`, `tabs.tsx`, `command-palette.tsx`, `toast.tsx`, and `lib/use-toast.ts` — they're now wrappers around the new primitives.
@@ -181,9 +181,9 @@ If you only want the **token system** (no Radix), you can stop after step 1's *g
 
 ## Why these token names?
 
-The tokens follow **shadcn/ui's convention** exactly (`primary`, `secondary`, `muted`, `accent`, `destructive`, `border`, `input`, `ring`, etc.). This is deliberate: it means when you later install shadcn components via `npx shadcn@latest add button`, they work out of the box against MaddieHQ's tokens with zero remapping.
+The tokens follow **shadcn/ui's convention** exactly (`primary`, `secondary`, `muted`, `accent`, `destructive`, `border`, `input`, `ring`, etc.). This is deliberate: it means when you later install shadcn components via `npx shadcn@latest add button`, they work out of the box against Coomander's tokens with zero remapping.
 
-MaddieHQ adds three extra semantic tokens that shadcn doesn't ship by default: `success`, `warning`, and `info`. These cover the common "status banner" use case that most apps need.
+Coomander adds three extra semantic tokens that shadcn doesn't ship by default: `success`, `warning`, and `info`. These cover the common "status banner" use case that most apps need.
 
 ## Mapping from old hardcoded classes
 

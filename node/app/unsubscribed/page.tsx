@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-const APP_NAME = process.env.APP_NAME || "MaddieHQ";
+const APP_NAME = process.env.APP_NAME || "Coomander";
 
 export const metadata = {
   title: `Unsubscribed — ${APP_NAME}`,

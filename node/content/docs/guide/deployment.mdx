@@ -1,6 +1,6 @@
 ---
 title: Deployment
-description: Deploy your MaddieHQ application to Docker or Railway.
+description: Deploy your Coomander application to Docker or Railway.
 ---
 
 ## Quick start
@@ -63,7 +63,7 @@ services:
     volumes:
       - ./your-app-name/data:/data
     environment:
-      DATABASE_PATH: /data/maddiehq.db
+      DATABASE_PATH: /data/coomander.db
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET}
       BETTER_AUTH_URL: https://yourapp.example.com
       APP_URL: https://yourapp.example.com
@@ -123,7 +123,7 @@ In Railway dashboard: Settings > Connect GitHub repo > Choose your repo > Set br
 
 In Railway dashboard: Go to your service > Variables > Add Volume > Mount path: `/data`
 
-**Critical:** Volume must exist BEFORE setting `DATABASE_PATH=/data/maddiehq.db`
+**Critical:** Volume must exist BEFORE setting `DATABASE_PATH=/data/coomander.db`
 
 #### 4. Set environment variables
 
@@ -132,7 +132,7 @@ railway variables set BETTER_AUTH_SECRET="$(openssl rand -base64 32)"
 railway variables set BETTER_AUTH_URL="https://yourapp.up.railway.app"
 railway variables set APP_URL="https://yourapp.up.railway.app"
 railway variables set APP_NAME="MyApp"
-railway variables set DATABASE_PATH="/data/maddiehq.db"
+railway variables set DATABASE_PATH="/data/coomander.db"
 ```
 
 #### 5. Deploy
@@ -237,7 +237,7 @@ One or more required env vars are missing. The error output tells you exactly wh
 Better Auth migrations didn't run. Trigger manually:
 
 ```bash
-docker exec maddiehq-node npx @better-auth/cli@latest migrate --config lib/auth.ts
+docker exec coomander-node npx @better-auth/cli@latest migrate --config lib/auth.ts
 ```
 
 ### "Address already in use"
@@ -246,4 +246,4 @@ Port conflict. Check what's using the port: `docker ps`
 
 ### "SQLITE_CANTOPEN"
 
-Ensure the volume exists at `/data` and `DATABASE_PATH=/data/maddiehq.db` is set.
+Ensure the volume exists at `/data` and `DATABASE_PATH=/data/coomander.db` is set.
