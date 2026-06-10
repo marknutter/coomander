@@ -44,6 +44,8 @@ crons = ["0 12 * * *", "0 18 * * *", "0 21 * * *", "0 1 * * *", "0 1 * * 1"]
 [vars]
 DATABASE_DRIVER = "d1"
 APP_NAME = "Coomander"
+BETTER_AUTH_URL = "https://coomander.com"
+APP_URL = "https://coomander.com"
 
 # ── D1 (Cloudflare's serverless SQLite) ────────────────────────────────
 # `binding = "DB"` is what runtime code looks up via getCloudflareContext()
@@ -52,7 +54,7 @@ APP_NAME = "Coomander"
 [[d1_databases]]
 binding = "DB"
 database_name = "coomander-db"
-database_id = "067da619-16e0-4dd0-b999-c6a168919a6c"
+database_id = "736e295c-3525-433d-9f5a-9135e0126c59"
 migrations_dir = "migrations"
 
 # ── R2 (object storage) ────────────────────────────────────────────────
@@ -72,9 +74,15 @@ bucket_name = "coomander-storage"
 # independently — see that directory's README. The shared secret used to
 # auth the call is stored as the VIDEO_PROCESSOR_SECRET Worker secret on
 # this side and SHARED_SECRET on the video processor side.
-[[services]]
-binding = "VIDEO_PROCESSOR"
-service = "coomander-video-processor"
+#
+# Temporarily disabled for the initial coomander.com launch: the container
+# Worker isn't deployed under its new name yet, and a service binding to a
+# nonexistent Worker fails the deploy. video-analysis.ts handles the missing
+# binding gracefully (returns null). Re-enable after deploying
+# coomander-video-processor (wrangler containers build/push + deploy).
+# [[services]]
+# binding = "VIDEO_PROCESSOR"
+# service = "coomander-video-processor"
 
 # ── Environment-specific overrides ─────────────────────────────────────
 # Production deploy will use `wrangler deploy --env production` and override
