@@ -1,3 +1,8 @@
+# Compose project name → prefixes the network and named volumes
+# (coomander_default, coomander_node_modules, coomander_caddy_state).
+# Pinned so it doesn't derive from the folder name (still "maddiehq" for now).
+name: coomander
+
 services:
   # ── Caddy + Tailscale sidecar ───────────────────────────────────────────
   # Joins the tailnet as ${TS_HOSTNAME}, gets a real HTTPS cert from
