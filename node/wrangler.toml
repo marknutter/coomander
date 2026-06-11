@@ -75,14 +75,9 @@ bucket_name = "coomander-storage"
 # auth the call is stored as the VIDEO_PROCESSOR_SECRET Worker secret on
 # this side and SHARED_SECRET on the video processor side.
 #
-# Temporarily disabled for the initial coomander.com launch: the container
-# Worker isn't deployed under its new name yet, and a service binding to a
-# nonexistent Worker fails the deploy. video-analysis.ts handles the missing
-# binding gracefully (returns null). Re-enable after deploying
-# coomander-video-processor (wrangler containers build/push + deploy).
-# [[services]]
-# binding = "VIDEO_PROCESSOR"
-# service = "coomander-video-processor"
+[[services]]
+binding = "VIDEO_PROCESSOR"
+service = "coomander-video-processor"
 
 # ── Environment-specific overrides ─────────────────────────────────────
 # Production deploy will use `wrangler deploy --env production` and override
