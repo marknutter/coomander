@@ -82,7 +82,7 @@ test.describe("Settings page", () => {
     // Navigate to settings
     await page.goto("/settings");
     await expect(page).toHaveURL(/\/settings/);
-    await expect(page).toHaveTitle(/MaddieHQ/i);
+    await expect(page).toHaveTitle(/Coomander/i);
   });
 
   test("settings page shows account info section", async ({ page }) => {

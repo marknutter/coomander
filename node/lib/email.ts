@@ -15,7 +15,7 @@ export function getResend() {
   return _resend;
 }
 
-export const APP_NAME = process.env.APP_NAME || 'MaddieHQ';
+export const APP_NAME = process.env.APP_NAME || 'Coomander';
 export const FROM = process.env.EMAIL_FROM || `${APP_NAME} <noreply@YOUR_DOMAIN>`;
 export const APP_URL = process.env.APP_URL || 'https://YOUR_DOMAIN';
 

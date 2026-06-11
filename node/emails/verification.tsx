@@ -10,7 +10,7 @@ interface VerificationEmailProps {
 }
 
 export default function VerificationEmail({
-  appName = "MaddieHQ",
+  appName = "Coomander",
   appUrl = "https://YOUR_DOMAIN",
   verificationUrl = "https://YOUR_DOMAIN/verify",
 }: VerificationEmailProps) {

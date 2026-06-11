@@ -23,14 +23,14 @@ const WAITLIST_MODE = process.env.NEXT_PUBLIC_WAITLIST_MODE === "true";
 
 /* ---------- JSON-LD Structured Data ---------- */
 
-const siteUrl = process.env.BETTER_AUTH_URL || "https://maddiehq.oqodo.com";
+const siteUrl = process.env.BETTER_AUTH_URL || "https://coomander.com";
 
 const jsonLd = {
   "@context": "https://schema.org",
   "@graph": [
     {
       "@type": "Organization",
-      name: "MaddieHQ",
+      name: "Coomander",
       url: siteUrl,
       logo: `${siteUrl}/icon.png`,
       description:
@@ -38,12 +38,12 @@ const jsonLd = {
     },
     {
       "@type": "WebSite",
-      name: "MaddieHQ",
+      name: "Coomander",
       url: siteUrl,
     },
     {
       "@type": "SoftwareApplication",
-      name: "MaddieHQ",
+      name: "Coomander",
       applicationCategory: "BusinessApplication",
       operatingSystem: "Any",
       offers: [
@@ -77,7 +77,7 @@ const features = [
     icon: Brain,
     title: "Caption parsing",
     description:
-      "Hook type, CTA presence, tone, emoji and hashtag density — Maddie HQ reads every caption and tells you what's converting and what isn't.",
+      "Hook type, CTA presence, tone, emoji and hashtag density — Coomander reads every caption and tells you what's converting and what isn't.",
   },
   {
     icon: Mic,
@@ -122,7 +122,7 @@ const steps = [
     step: "01",
     title: "Connect Instagram",
     description:
-      "One-tap OAuth — MaddieHQ pulls your posts, audience demographics, and per-post insights with read-only permissions.",
+      "One-tap OAuth — Coomander pulls your posts, audience demographics, and per-post insights with read-only permissions.",
   },
   {
     step: "02",
@@ -182,7 +182,7 @@ const pricingPlans = [
 const testimonials = [
   {
     quote:
-      "I've been guessing at what my audience wants for two years. MaddieHQ told me in one report — the patterns were obvious once it laid them out.",
+      "I've been guessing at what my audience wants for two years. Coomander told me in one report — the patterns were obvious once it laid them out.",
     author: "Jordan R.",
     role: "Lifestyle creator · 180K followers",
     avatar: "JR",
@@ -229,7 +229,7 @@ export default function HomePage() {
           </h1>
 
           <p className="text-lg sm:text-xl text-gray-500 dark:text-gray-400 max-w-2xl mx-auto mb-10 leading-relaxed">
-            MaddieHQ reads every post, transcribes every reel, and tells you the
+            Coomander reads every post, transcribes every reel, and tells you the
             non-obvious patterns driving your engagement — with a strategist-grade
             explanation for each one.
           </p>
@@ -285,7 +285,7 @@ export default function HomePage() {
               Every signal Instagram won&apos;t show you
             </h2>
             <p className="mt-4 text-lg text-gray-500 dark:text-gray-400 max-w-2xl mx-auto">
-              MaddieHQ joins your post performance to AI analysis of every image,
+              Coomander joins your post performance to AI analysis of every image,
               caption, and reel — then surfaces the patterns that actually predict
               engagement.
             </p>
@@ -466,7 +466,7 @@ export default function HomePage() {
               Trusted by creators who care about the data
             </h2>
             <p className="mt-4 text-lg text-gray-500 dark:text-gray-400">
-              What creators say after their first MaddieHQ report.
+              What creators say after their first Coomander report.
             </p>
           </div>
 
@@ -514,7 +514,7 @@ export default function HomePage() {
               Frequently asked questions
             </h2>
             <p className="mt-4 text-lg text-gray-500 dark:text-gray-400">
-              Everything you need to know about MaddieHQ.
+              Everything you need to know about Coomander.
             </p>
           </div>
 
@@ -572,7 +572,7 @@ export default function HomePage() {
               <div className="flex items-center gap-2 mb-4">
                 <Sparkles className="w-5 h-5 text-primary" />
                 <span className="font-bold text-gray-900 dark:text-gray-100">
-                  MaddieHQ
+                  Coomander
                 </span>
               </div>
               <p className="text-sm text-gray-500 dark:text-gray-400">
@@ -655,7 +655,7 @@ export default function HomePage() {
                 </li>
                 <li>
                   <a
-                    href="mailto:hello@maddiehq.com"
+                    href="mailto:hello@coomander.com"
                     className="hover:text-gray-900 dark:hover:text-gray-200 transition-colors"
                   >
                     Email
@@ -667,7 +667,7 @@ export default function HomePage() {
 
           <div className="mt-10 pt-6 border-t border-gray-200 dark:border-gray-800 flex flex-col sm:flex-row items-center justify-between gap-4">
             <p className="text-sm text-gray-400 dark:text-gray-500">
-              &copy; {new Date().getFullYear()} MaddieHQ. All rights reserved.
+              &copy; {new Date().getFullYear()} Coomander. All rights reserved.
             </p>
             <p className="text-xs text-gray-400 dark:text-gray-500">
               <Smartphone className="inline w-3 h-3 mr-1" />

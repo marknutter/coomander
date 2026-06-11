@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 
 export const metadata: Metadata = {
   title: "Settings",
-  description: "Manage your MaddieHQ account settings.",
+  description: "Manage your Coomander account settings.",
   robots: { index: false, follow: false },
 };
 

@@ -22,7 +22,7 @@ interface EmailLayoutProps {
 export function EmailLayout({
   preview,
   children,
-  appName = "MaddieHQ",
+  appName = "Coomander",
   appUrl = "https://YOUR_DOMAIN",
   unsubscribeUrl,
 }: EmailLayoutProps) {

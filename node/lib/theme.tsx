@@ -22,8 +22,8 @@ interface ThemeContextValue {
 
 const ThemeContext = createContext<ThemeContextValue | undefined>(undefined);
 
-const STORAGE_KEY = "maddiehq-theme";
-const COOKIE_KEY = "maddiehq-theme";
+const STORAGE_KEY = "coomander-theme";
+const COOKIE_KEY = "coomander-theme";
 
 /**
  * Reads the stored theme preference from localStorage.

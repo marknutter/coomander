@@ -1,5 +1,5 @@
 {
-  "name": "maddiehq-video-processor-worker",
+  "name": "coomander-video-processor-worker",
   "version": "0.1.0",
   "private": true,
   "scripts": {

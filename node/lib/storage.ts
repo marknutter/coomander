@@ -7,7 +7,7 @@
  *
  *   2. S3-compatible (AWS S3, R2 via S3 API, or any S3-compatible host)
  *      Uses `S3_*` env vars. Works on Workers via `fetch`, also works on
- *      Vercel/Railway/Fly. Use this when MaddieHQ isn't on Workers.
+ *      Vercel/Railway/Fly. Use this when Coomander isn't on Workers.
  *
  *   3. Local filesystem (dev only)
  *      Writes under `./data/uploads`. Crashes on Workers (no fs).
@@ -230,7 +230,7 @@ function getBackend(): StorageBackend {
   throw new Error(
     "No storage backend available. On Cloudflare Workers (DATABASE_DRIVER=d1), " +
       "configure EITHER an R2 binding (uncomment [[r2_buckets]] binding=\"STORAGE\" " +
-      "in wrangler.toml and run `wrangler r2 bucket create maddiehq-storage`), " +
+      "in wrangler.toml and run `wrangler r2 bucket create coomander-storage`), " +
       "OR S3-compatible env vars (S3_ENDPOINT, S3_BUCKET, S3_ACCESS_KEY, S3_SECRET_KEY). " +
       "See the README \"Storage\" section for both setups."
   );

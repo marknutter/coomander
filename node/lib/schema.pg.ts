@@ -30,6 +30,9 @@ export const user = pgTable("user", {
   subscriptionStatus: text("subscriptionStatus").default("inactive"),
   isAdmin: integer("isAdmin").notNull().default(0),
   disabled: integer("disabled").notNull().default(0),
+  // Coomander (#151): Telegram destination + opt-in flag for the ops agent.
+  telegramChatId: text("telegramChatId"),
+  coomanderEnabled: integer("coomanderEnabled").notNull().default(0),
 });
 
 export const session = pgTable("session", {
@@ -426,3 +429,190 @@ export const contentInsights = pgTable("content_insights", {
 }, (table) => [
   index("idx_content_insights_user_id").on(table.user_id),
 ]);
+
+// ─── Coomander — AI ops agent infrastructure (#151) ──────────────────────────
+// Mirrors schema.sqlite.ts. See migrations/016_coomander_infra.sql.
+
+export const coomanderSettings = pgTable("coomander_settings", {
+  user_id: text("user_id").primaryKey().references(() => user.id, { onDelete: "cascade" }),
+  nag_frequency: text("nag_frequency").notNull().default("tight"),
+  persona_mode: text("persona_mode").notNull().default("light_companion"),
+  ping_times_json: text("ping_times_json"),
+  companion_consent_at: integer("companion_consent_at"),
+  ops_seeded_at: integer("ops_seeded_at"),
+  defaults_banner_dismissed_at: integer("defaults_banner_dismissed_at"),
+  created_at: integer("created_at").notNull().default(sql`extract(epoch from now())::integer`),
+  updated_at: integer("updated_at").notNull().default(sql`extract(epoch from now())::integer`),
+});
+
+// RETENTION POLICY: NO TTL, NO deletion sweep, EVER. Long-term companion-memory
+// substrate. Deletion is a manual operator action only, never code.
+export const coomanderMessageLog = pgTable("coomander_message_log", {
+  id: text("id").primaryKey(),
+  user_id: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  direction: text("direction").notNull(),
+  telegram_update_id: integer("telegram_update_id"),
+  text: text("text").notNull(),
+  tool_call_json: text("tool_call_json"),
+  persona_mode: text("persona_mode").notNull().default("light_companion"),
+  created_at: integer("created_at").notNull().default(sql`extract(epoch from now())::integer`),
+}, (table) => [
+  index("idx_coomander_message_log_user_created").on(table.user_id, table.created_at),
+]);
+
+export const coomanderUsage = pgTable("coomander_usage", {
+  id: text("id").primaryKey(),
+  user_id: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  slot_or_inbound: text("slot_or_inbound").notNull(),
+  input_tokens: integer("input_tokens").notNull().default(0),
+  output_tokens: integer("output_tokens").notNull().default(0),
+  model: text("model").notNull(),
+  created_at: integer("created_at").notNull().default(sql`extract(epoch from now())::integer`),
+}, (table) => [
+  index("idx_coomander_usage_user_id").on(table.user_id),
+]);
+
+export const coomanderDayState = pgTable("coomander_day_state", {
+  id: text("id").primaryKey(),
+  user_id: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  date: text("date").notNull(),
+  morning_ping_sent_at: integer("morning_ping_sent_at"),
+  midday_ping_sent_at: integer("midday_ping_sent_at"),
+  evening_recap_at: integer("evening_recap_at"),
+  day_quality: text("day_quality"),
+}, (table) => [
+  uniqueIndex("coomander_day_state_user_date_unique").on(table.user_id, table.date),
+  index("idx_coomander_day_state_user_id").on(table.user_id),
+]);
+
+export const coomanderDedup = pgTable("coomander_dedup", {
+  telegram_update_id: integer("telegram_update_id").primaryKey(),
+  user_id: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  processed_at: integer("processed_at").notNull().default(sql`extract(epoch from now())::integer`),
+});
+
+// ─── Coomander ops domain model (#152) ───────────────────────────────────────
+// Mirrors schema.sqlite.ts. See migrations/017_coomander_domain.sql.
+
+export const cadencePillars = pgTable("cadence_pillars", {
+  id: text("id").primaryKey(),
+  user_id: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  kind: text("kind").$type<"content" | "wall" | "procurement" | "engagement" | "admin">().notNull(),
+  display_order: integer("display_order").notNull().default(0),
+  source: text("source").notNull().default("custom"),
+  archived_at: integer("archived_at"),
+  created_at: integer("created_at").notNull().default(sql`extract(epoch from now())::integer`),
+  updated_at: integer("updated_at").notNull().default(sql`extract(epoch from now())::integer`),
+}, (table) => [
+  index("idx_cadence_pillars_user_id").on(table.user_id),
+]);
+
+export const cadenceBeats = pgTable("cadence_beats", {
+  id: text("id").primaryKey(),
+  user_id: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  pillar_id: text("pillar_id").notNull().references(() => cadencePillars.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  cadence_kind: text("cadence_kind").$type<"daily" | "weekly" | "window" | "daily_vlog_buffer">().notNull(),
+  target_count: integer("target_count").notNull().default(1),
+  buffer_goal_days: integer("buffer_goal_days"),
+  window_start: text("window_start"),
+  window_end: text("window_end"),
+  priority: text("priority").$type<"low" | "med" | "high">().notNull().default("med"),
+  platform_specific: text("platform_specific").$type<"ig" | "tiktok" | "fb" | "snap" | "of" | null>(),
+  subtype: text("subtype"),
+  active: integer("active").notNull().default(1),
+  source: text("source").notNull().default("custom"),
+  archived_at: integer("archived_at"),
+  notes: text("notes"),
+  created_at: integer("created_at").notNull().default(sql`extract(epoch from now())::integer`),
+  updated_at: integer("updated_at").notNull().default(sql`extract(epoch from now())::integer`),
+}, (table) => [
+  index("idx_cadence_beats_user_id").on(table.user_id),
+  index("idx_cadence_beats_pillar_id").on(table.pillar_id),
+]);
+
+export type ContentStateValue =
+  | "drafted" | "shot" | "approved" | "uploaded_to_edit" | "edited" | "scheduled" | "shipped";
+
+export const contentStates = pgTable("content_states", {
+  id: text("id").primaryKey(),
+  user_id: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  beat_id: text("beat_id").references(() => cadenceBeats.id, { onDelete: "set null" }),
+  title: text("title").notNull(),
+  current_state: text("current_state").$type<ContentStateValue>().notNull().default("drafted"),
+  state_history_json: text("state_history_json").notNull().default("[]"),
+  drive_url: text("drive_url"),
+  edited_url: text("edited_url"),
+  notes: text("notes"),
+  created_at: integer("created_at").notNull().default(sql`extract(epoch from now())::integer`),
+  updated_at: integer("updated_at").notNull().default(sql`extract(epoch from now())::integer`),
+}, (table) => [
+  index("idx_content_states_user_id").on(table.user_id),
+  index("idx_content_states_user_state").on(table.user_id, table.current_state),
+  index("idx_content_states_beat_id").on(table.beat_id),
+]);
+
+export const drops = pgTable("drops", {
+  id: text("id").primaryKey(),
+  user_id: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  beat_id: text("beat_id").notNull().references(() => cadenceBeats.id, { onDelete: "cascade" }),
+  kind: text("kind").$type<"shipped" | "purchased" | "completed" | "captured">().notNull(),
+  source: text("source").$type<"auto_ig" | "auto_of" | "telegram" | "manual_ui">().notNull(),
+  platform: text("platform").$type<"ig" | "tiktok" | "fb" | "snap" | "of" | null>(),
+  external_ref: text("external_ref"),
+  content_state_id: text("content_state_id").references(() => contentStates.id, { onDelete: "set null" }),
+  payload_json: text("payload_json").notNull().default("{}"),
+  dropped_at: integer("dropped_at").notNull().default(sql`extract(epoch from now())::integer`),
+  created_at: integer("created_at").notNull().default(sql`extract(epoch from now())::integer`),
+}, (table) => [
+  index("idx_drops_user_id").on(table.user_id),
+  index("idx_drops_user_beat_dropped").on(table.user_id, table.beat_id, table.dropped_at),
+]);
+
+export const procurementItems = pgTable("procurement_items", {
+  id: text("id").primaryKey(),
+  user_id: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  beat_id: text("beat_id").references(() => cadenceBeats.id, { onDelete: "set null" }),
+  category: text("category").$type<"shoot_prep" | "business_admin">().notNull(),
+  label: text("label").notNull(),
+  status: text("status").$type<"needed" | "ordered" | "received" | "canceled">().notNull().default("needed"),
+  needed_by: text("needed_by"),
+  estimated_cost_cents: integer("estimated_cost_cents"),
+  actual_cost_cents: integer("actual_cost_cents"),
+  source: text("source").notNull().default("custom"),
+  notes: text("notes"),
+  created_at: integer("created_at").notNull().default(sql`extract(epoch from now())::integer`),
+  updated_at: integer("updated_at").notNull().default(sql`extract(epoch from now())::integer`),
+}, (table) => [
+  index("idx_procurement_user_id").on(table.user_id),
+  index("idx_procurement_user_category").on(table.user_id, table.category),
+]);
+
+export type CadencePillar = typeof cadencePillars.$inferSelect;
+export type NewCadencePillar = typeof cadencePillars.$inferInsert;
+export type CadenceBeat = typeof cadenceBeats.$inferSelect;
+export type NewCadenceBeat = typeof cadenceBeats.$inferInsert;
+export type ContentState = typeof contentStates.$inferSelect;
+export type NewContentState = typeof contentStates.$inferInsert;
+export type Drop = typeof drops.$inferSelect;
+export type NewDrop = typeof drops.$inferInsert;
+export type ProcurementItem = typeof procurementItems.$inferSelect;
+export type NewProcurementItem = typeof procurementItems.$inferInsert;
+
+// ─── Coomander weekly review (#154) ──────────────────────────────────────────
+export const weeklyReviews = pgTable("weekly_reviews", {
+  id: text("id").primaryKey(),
+  user_id: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  week_ending: text("week_ending").notNull(),
+  review_json: text("review_json").notNull(),
+  telegram_message_id: integer("telegram_message_id"),
+  drift_question_message_ids_json: text("drift_question_message_ids_json").notNull().default("[]"),
+  created_at: integer("created_at").notNull().default(sql`extract(epoch from now())::integer`),
+}, (table) => [
+  uniqueIndex("weekly_reviews_user_week_unique").on(table.user_id, table.week_ending),
+  index("idx_weekly_reviews_user_id").on(table.user_id),
+]);
+
+export type WeeklyReviewRow = typeof weeklyReviews.$inferSelect;
+export type NewWeeklyReviewRow = typeof weeklyReviews.$inferInsert;

@@ -1,8 +1,8 @@
-# maddiehq-video-processor
+# coomander-video-processor
 
-Standalone Cloudflare Worker + Container that does ffmpeg-based video processing for the main `maddiehq` Worker. Handles audio transcription (OpenAI Whisper) and key-frame extraction + Claude vision over the frame sequence.
+Standalone Cloudflare Worker + Container that does ffmpeg-based video processing for the main `coomander` Worker. Handles audio transcription (OpenAI Whisper) and key-frame extraction + Claude vision over the frame sequence.
 
-The main `maddiehq` Worker calls this service via the `VIDEO_PROCESSOR` service binding declared in `../../wrangler.toml`. Cross-Worker auth is a shared secret on the `x-internal-secret` request header.
+The main `coomander` Worker calls this service via the `VIDEO_PROCESSOR` service binding declared in `../../wrangler.toml`. Cross-Worker auth is a shared secret on the `x-internal-secret` request header.
 
 ## Deploy
 
@@ -12,11 +12,11 @@ npm install
 wrangler login                       # if not already authed
 wrangler containers build            # build the container image
 wrangler containers push             # push to Cloudflare's managed registry
-wrangler secret put SHARED_SECRET    # paste the same secret you set on the maddiehq worker as VIDEO_PROCESSOR_SECRET
+wrangler secret put SHARED_SECRET    # paste the same secret you set on the coomander worker as VIDEO_PROCESSOR_SECRET
 wrangler deploy
 ```
 
-The shared secret must match between this Worker (`SHARED_SECRET`) and the main maddiehq Worker (`VIDEO_PROCESSOR_SECRET`).
+The shared secret must match between this Worker (`SHARED_SECRET`) and the main coomander Worker (`VIDEO_PROCESSOR_SECRET`).
 
 ## API
 

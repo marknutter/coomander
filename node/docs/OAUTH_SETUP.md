@@ -1,6 +1,6 @@
 # OAuth Setup Guide
 
-MaddieHQ includes Google and GitHub OAuth via Better Auth.
+Coomander includes Google and GitHub OAuth via Better Auth.
 
 ## Features
 

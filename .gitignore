@@ -55,3 +55,7 @@ next-env.d.ts
 # OpenClaw external tool state
 .openclaw/
 .claude/scheduled_tasks.lock
+
+# Private research materials (Maddie's chats, notes, etc.) — never commit
+research/
+docs/research/

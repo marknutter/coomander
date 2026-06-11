@@ -1,136 +1,262 @@
 "use client";
 
+/**
+ * Agent-first home (#170, epic #168).
+ *
+ * Coomander leads: a today greeting + "what's on the table today" grounded in
+ * the live TodayModel + Day 1-6 ramp, quick actions that seed the chat, and a
+ * recent-thread snippet. Cadence + Insights are demoted to the supporting
+ * "detail behind the agent" (#172). New users land in the conversational
+ * "meet Coomander" onboarding (#173) instead of a feature-card grid.
+ */
+
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
 import Link from "next/link";
-import { Sprout, LogOut, Star, ExternalLink, Lock, Settings, Sun, Moon, Monitor, MessageSquare, Sparkles, ArrowRight } from "lucide-react";
-import { NotificationBell } from "@/components/notification-bell";
+import {
+  Bot, LogOut, Star, ArrowRight, Settings, Sun, Moon, Monitor,
+  MessageSquare, Sparkles, ListChecks, Send, CheckCircle2, AlertTriangle, Flame,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Alert } from "@/components/ui/alert";
 import { Modal } from "@/components/ui/modal";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ThemeToggle } from "@/components/ui/theme-toggle";
+import { Badge } from "@/components/ui/badge";
 import { toast } from "@/lib/use-toast";
 import { commandRegistry } from "@/lib/commands";
-import { Onboarding } from "@/components/onboarding";
+import { CoomanderOnboarding, ONBOARDING_DISMISSED_KEY } from "@/components/coomander-onboarding";
 
-// ─── Insights Card ────────────────────────────────────────────────────────────
-function InsightsCard({ state }: { state: InsightsState }) {
-  if (state.kind === "loading") {
-    return (
-      <Card title="Insights" headerAction={<Sparkles className="w-4 h-4 text-primary" />}>
-        <Skeleton className="h-12 w-full" />
-      </Card>
-    );
+// ── Types mirroring GET /api/coomander/home ─────────────────────────────────────
+interface HomeBeatLine {
+  beatId: string;
+  name: string;
+  pillar: string;
+  expectedToday: number;
+  actualToday: number;
+  status: string;
+  detail?: string;
+}
+interface HomeBrief {
+  date: string;
+  rampDay: number | null;
+  inRamp: boolean;
+  overallState: "green" | "yellow" | "red";
+  dayQuality: "good" | "bad" | null;
+  contentCushionDays: number;
+  shippedToday: number;
+  headline: string;
+  onTheTable: HomeBeatLine[];
+  urgentProcurement: string[];
+}
+interface RecentMessage { id: string; role: "user" | "assistant"; content: string; createdAt: number }
+interface HomeData {
+  enabled: boolean;
+  seeded: boolean;
+  brief: HomeBrief | null;
+  recentMessages: RecentMessage[];
+}
+
+const QUICK_ACTIONS = [
+  "What should I focus on today?",
+  "Log a reel",
+  "What's my content cushion?",
+  "What's blocking me?",
+];
+
+const ATTENTION = new Set(["behind", "untouched", "buffer_low"]);
+
+function statusDot(status: string): string {
+  if (ATTENTION.has(status)) return "bg-amber-500";
+  if (status === "ahead" || status === "completed" || status === "buffer_healthy") return "bg-emerald-500";
+  return "bg-gray-300 dark:bg-gray-600"; // on_pace / neutral
+}
+
+function overallPill(state: "green" | "yellow" | "red"): { label: string; cls: string } {
+  switch (state) {
+    case "red": return { label: "Needs attention", cls: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300" };
+    case "yellow": return { label: "On watch", cls: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300" };
+    case "green": default: return { label: "On track", cls: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300" };
   }
+}
 
-  if (state.kind === "no-connection") {
-    return (
-      <Card title="Insights" headerAction={<Sparkles className="w-4 h-4 text-primary" />}>
-        <p className="text-sm text-gray-600 dark:text-gray-300 mb-4">
-          MaddieHQ analyzes your Instagram posts with Claude vision and Whisper, then
-          surfaces the non-obvious patterns driving your engagement — visual style,
-          hook type, on-camera energy, and audience demographics, all cross-referenced
-          against your reach and saves.
-        </p>
-        <Link
-          href="/app/insights"
-          className="inline-flex items-center gap-2 bg-primary text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-primary/90 transition-colors"
-        >
-          Connect Instagram
-          <ArrowRight className="w-4 h-4" />
-        </Link>
-      </Card>
-    );
-  }
-
-  if (state.kind === "connected-no-report") {
-    return (
-      <Card title="Insights" headerAction={<Sparkles className="w-4 h-4 text-primary" />}>
-        <p className="text-sm text-gray-600 dark:text-gray-300 mb-3">
-          Instagram is connected
-          {state.postCount != null ? ` (${state.postCount} posts` : ""}
-          {state.followerCount != null ? `, ${formatCount(state.followerCount)} followers)` : state.postCount != null ? ")" : ""}.
-        </p>
-        <p className="text-sm text-gray-600 dark:text-gray-300 mb-4">
-          You haven&apos;t run an analysis yet. Head to insights to generate your first
-          report — patterns, recommendations, and per-post breakdowns.
-        </p>
-        <Link
-          href="/app/insights"
-          className="inline-flex items-center gap-2 bg-primary text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-primary/90 transition-colors"
-        >
-          Open insights
-          <ArrowRight className="w-4 h-4" />
-        </Link>
-      </Card>
-    );
-  }
-
+// ── Agent hero ───────────────────────────────────────────────────────────────
+function AgentHero({ brief, onAction }: { brief: HomeBrief; onAction: (q: string) => void }) {
+  const pill = overallPill(brief.overallState);
   return (
-    <Card title="Insights" headerAction={<Sparkles className="w-4 h-4 text-primary" />}>
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
-        <SummaryStat label="Followers" value={formatCount(state.followerCount)} />
-        <SummaryStat label="Posts synced" value={formatCount(state.postCount)} />
-        <SummaryStat label="Posts analyzed" value={String(state.postsAnalyzed)} />
-        <SummaryStat label="Last run" value={formatRelative(state.generatedAt)} />
+    <Card padding="lg">
+      <div className="flex items-start gap-3 mb-4">
+        <div className="flex items-center justify-center w-11 h-11 bg-accent rounded-xl shrink-0">
+          <Bot className="w-6 h-6 text-primary" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 flex-wrap mb-1">
+            <span className="font-bold text-gray-900 dark:text-gray-100">Coomander</span>
+            <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${pill.cls}`}>{pill.label}</span>
+            {brief.inRamp && brief.rampDay != null && (
+              <Badge variant="default" icon={<Flame className="w-3 h-3" />}>Ramp day {brief.rampDay}</Badge>
+            )}
+          </div>
+          <p className="text-sm text-gray-700 dark:text-gray-200 leading-relaxed">{brief.headline}</p>
+        </div>
       </div>
-      {state.topPattern ? (
-        <p className="text-sm text-gray-600 dark:text-gray-300 mb-4">
-          <span className="text-gray-500 dark:text-gray-400">Top pattern:</span>{" "}
-          <span className="font-medium text-gray-900 dark:text-gray-100">
-            {state.topPattern}
-          </span>
-        </p>
-      ) : null}
+
+      {/* On the table today */}
+      <div className="rounded-xl border border-gray-200 dark:border-gray-700 divide-y divide-gray-100 dark:divide-gray-700/60 mb-4">
+        <div className="px-4 py-2 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+          On the table today
+        </div>
+        {brief.onTheTable.length === 0 ? (
+          <div className="px-4 py-4 text-sm text-gray-500 dark:text-gray-400 flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+            Nothing outstanding today — nice. Bank some buffer if you can.
+          </div>
+        ) : (
+          brief.onTheTable.slice(0, 6).map((b) => (
+            <div key={b.beatId} className="px-4 py-2.5 flex items-center gap-3">
+              <span className={`w-2 h-2 rounded-full shrink-0 ${statusDot(b.status)}`} />
+              <div className="min-w-0 flex-1">
+                <div className="text-sm text-gray-900 dark:text-gray-100 truncate">{b.name}</div>
+                <div className="text-xs text-gray-400 dark:text-gray-500 truncate">{b.pillar}</div>
+              </div>
+              <div className="text-xs text-gray-500 dark:text-gray-400 text-right shrink-0">
+                {b.detail ? b.detail : `${b.actualToday}/${b.expectedToday} today`}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* Quick stats */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-4">
+        <MiniStat label="Cushion" value={`${brief.contentCushionDays}d`} warn={brief.contentCushionDays < 2} />
+        <MiniStat label="Shipped today" value={String(brief.shippedToday)} />
+        {brief.urgentProcurement.length > 0 && (
+          <MiniStat label="Urgent prep" value={String(brief.urgentProcurement.length)} warn />
+        )}
+      </div>
+
+      {/* Quick actions seed the chat */}
+      <div className="flex flex-wrap gap-2 mb-4">
+        {QUICK_ACTIONS.map((q) => (
+          <button
+            key={q}
+            onClick={() => onAction(q)}
+            className="px-3 py-1.5 rounded-full border border-gray-200 dark:border-gray-700 text-xs text-gray-600 dark:text-gray-300 hover:border-primary hover:text-primary transition-colors"
+          >
+            {q}
+          </button>
+        ))}
+      </div>
+
       <Link
-        href="/app/insights"
+        href="/app/chat"
         className="inline-flex items-center gap-2 bg-primary text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-primary/90 transition-colors"
       >
-        Open insights
-        <ArrowRight className="w-4 h-4" />
+        <MessageSquare className="w-4 h-4" />
+        Open chat
       </Link>
     </Card>
   );
 }
 
-function SummaryStat({ label, value }: { label: string; value: string }) {
+function MiniStat({ label, value, warn }: { label: string; value: string; warn?: boolean }) {
   return (
-    <div className="rounded-md border border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-800/50 px-3 py-2">
-      <div className="text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400">{label}</div>
+    <div className={`rounded-md border px-3 py-2 ${warn ? "border-amber-300 bg-amber-50 dark:border-amber-700/60 dark:bg-amber-900/20" : "border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-800/50"}`}>
+      <div className="text-[11px] uppercase tracking-wider text-gray-500 dark:text-gray-400 flex items-center gap-1">
+        {warn && <AlertTriangle className="w-3 h-3" />}{label}
+      </div>
       <div className="mt-0.5 text-lg font-semibold text-gray-900 dark:text-gray-100">{value}</div>
     </div>
   );
 }
 
-function formatCount(n: number | null | undefined): string {
-  if (n == null) return "—";
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return String(n);
+// ── Recent thread snippet ────────────────────────────────────────────────────
+function RecentThread({ messages }: { messages: RecentMessage[] }) {
+  if (!messages.length) return null;
+  return (
+    <Card title="Recent conversation" headerAction={<MessageSquare className="w-4 h-4 text-primary" />}>
+      <div className="space-y-2 mb-3">
+        {messages.slice(-3).map((m) => (
+          <div key={m.id} className="flex gap-2 text-sm">
+            <span className={`shrink-0 text-xs font-medium ${m.role === "assistant" ? "text-primary" : "text-gray-400 dark:text-gray-500"}`}>
+              {m.role === "assistant" ? "Coomander" : "You"}
+            </span>
+            <span className="text-gray-600 dark:text-gray-300 line-clamp-2">{m.content}</span>
+          </div>
+        ))}
+      </div>
+      <Link href="/app/chat" className="inline-flex items-center gap-1.5 text-sm text-primary hover:text-primary/80 font-medium">
+        Open full chat <ArrowRight className="w-3.5 h-3.5" />
+      </Link>
+    </Card>
+  );
 }
 
-function formatRelative(iso: string): string {
-  const then = new Date(iso).getTime();
-  if (!Number.isFinite(then)) return "—";
-  const diffMs = Date.now() - then;
-  const sec = Math.floor(diffMs / 1000);
-  if (sec < 60) return "just now";
-  const min = Math.floor(sec / 60);
-  if (min < 60) return `${min}m ago`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h ago`;
-  const days = Math.floor(hr / 24);
-  return `${days}d ago`;
+// ── Secondary surfaces (the detail behind the agent, #172) ───────────────────
+function SecondarySurfaces() {
+  return (
+    <div>
+      <h2 className="text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-2 px-1">
+        The detail behind the agent
+      </h2>
+      <div className="grid sm:grid-cols-2 gap-4">
+        <SurfaceCard
+          href="/app/cadence"
+          icon={<ListChecks className="w-4 h-4 text-primary" />}
+          title="Cadence"
+          body="The detailed manager view — your pillars, beats, and weekly review. Coomander keeps it updated; open it to see and adjust the plan."
+          cta="Open Cadence"
+        />
+        <SurfaceCard
+          href="/app/insights"
+          icon={<Sparkles className="w-4 h-4 text-primary" />}
+          title="Insights"
+          body="The analytics surface — Instagram patterns, reach, and per-post breakdowns that ground Coomander's advice in your real numbers."
+          cta="Open Insights"
+        />
+      </div>
+    </div>
+  );
 }
 
-// ─── Upgrade Modal ────────────────────────────────────────────────────────────
+function SurfaceCard({ href, icon, title, body, cta }: { href: string; icon: React.ReactNode; title: string; body: string; cta: string }) {
+  return (
+    <Card title={title} headerAction={icon}>
+      <p className="text-sm text-gray-600 dark:text-gray-300 mb-4">{body}</p>
+      <Link href={href} className="inline-flex items-center gap-1.5 text-sm text-primary hover:text-primary/80 font-medium">
+        {cta} <ArrowRight className="w-3.5 h-3.5" />
+      </Link>
+    </Card>
+  );
+}
+
+// ── New-user empty state ─────────────────────────────────────────────────────
+function MeetCoomanderHero({ onStart }: { onStart: () => void }) {
+  return (
+    <Card padding="lg">
+      <div className="text-center py-6">
+        <div className="flex items-center justify-center w-16 h-16 bg-accent rounded-2xl mx-auto mb-5">
+          <Bot className="w-8 h-8 text-primary" />
+        </div>
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-2">Meet Coomander</h1>
+        <p className="text-sm text-gray-500 dark:text-gray-400 leading-relaxed max-w-md mx-auto mb-6">
+          Your AI operations manager. It sets up your content cadence, keeps you on track,
+          and logs what you ship when you just tell it — here or on Telegram, one thread.
+          Let&apos;s get you set up.
+        </p>
+        <Button variant="primary" size="lg" icon={<Sparkles className="w-4 h-4" />} onClick={onStart}>
+          Set up Coomander
+        </Button>
+      </div>
+    </Card>
+  );
+}
+
+// ── Upgrade modal ────────────────────────────────────────────────────────────
 function UpgradeModalContent({ onDismiss }: { onDismiss: () => void }) {
   const [loading, setLoading] = useState(false);
-
   const handleUpgrade = async () => {
     setLoading(true);
     try {
@@ -145,70 +271,50 @@ function UpgradeModalContent({ onDismiss }: { onDismiss: () => void }) {
       setLoading(false);
     }
   };
-
   return (
     <>
       <ul className="space-y-3 mb-6">
         {[
-          { icon: "\u221E", text: "Unlimited access to all features" },
-          { icon: "\uD83D\uDE80", text: "Priority support" },
-          { icon: "\u2728", text: "Early access to new features" },
+          { icon: "∞", text: "Unlimited access to all features" },
+          { icon: "🚀", text: "Priority support" },
+          { icon: "✨", text: "Early access to new features" },
         ].map((f) => (
           <li key={f.text} className="flex items-center gap-3">
-            <span className="w-7 h-7 bg-accent text-primary rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0">
-              {f.icon}
-            </span>
+            <span className="w-7 h-7 bg-accent text-primary rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0">{f.icon}</span>
             <span className="text-sm text-gray-700 dark:text-gray-300">{f.text}</span>
           </li>
         ))}
       </ul>
-
-      <Button
-        variant="primary"
-        size="lg"
-        loading={loading}
-        icon={<ExternalLink className="w-4 h-4" />}
-        onClick={handleUpgrade}
-        className="w-full mb-3"
-      >
+      <Button variant="primary" size="lg" loading={loading} icon={<Send className="w-4 h-4" />} onClick={handleUpgrade} className="w-full mb-3">
         Upgrade now
       </Button>
-      <button
-        onClick={onDismiss}
-        className="w-full text-gray-400 dark:text-gray-500 text-sm hover:text-gray-600 dark:hover:text-gray-400 transition-colors"
-      >
+      <button onClick={onDismiss} className="w-full text-gray-400 dark:text-gray-500 text-sm hover:text-gray-600 dark:hover:text-gray-400 transition-colors">
         Maybe later
       </button>
     </>
   );
 }
 
-// ─── Main page ───────────────────────────────────────────────────────────────
-type InsightsState =
-  | { kind: "loading" }
-  | { kind: "no-connection" }
-  | { kind: "connected-no-report"; followerCount: number | null; postCount: number | null }
-  | {
-      kind: "report";
-      followerCount: number | null;
-      postCount: number | null;
-      postsAnalyzed: number;
-      generatedAt: string;
-      topPattern: string | null;
-    };
-
+// ── Page ─────────────────────────────────────────────────────────────────────
 export default function AppPage() {
   const router = useRouter();
-  const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [home, setHome] = useState<HomeData | null>(null);
   const [plan, setPlan] = useState<string>("free");
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [upgradeBannerDismissed, setUpgradeBannerDismissed] = useState(false);
-  const [portalLoading, setPortalLoading] = useState(false);
-  const [authLoading, setAuthLoading] = useState(true);
   const [verifiedBanner, setVerifiedBanner] = useState(false);
-  const [insightsState, setInsightsState] = useState<InsightsState>({ kind: "loading" });
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
 
   const isPro = plan === "pro";
+
+  const loadHome = useCallback(async () => {
+    const res = await fetch("/api/coomander/home");
+    if (!res.ok) throw new Error(`home load failed: ${res.status}`);
+    const data = (await res.json()) as HomeData;
+    setHome(data);
+    return data;
+  }, []);
 
   const loadPlanStatus = useCallback(async () => {
     const res = await fetch("/api/stripe/status");
@@ -218,52 +324,16 @@ export default function AppPage() {
     }
   }, []);
 
-  const loadInsightsSummary = useCallback(async () => {
-    try {
-      const [accountRes, reportRes] = await Promise.all([
-        fetch("/api/platforms/instagram/account"),
-        fetch("/api/analyze/instagram"),
-      ]);
-
-      const account = accountRes.ok ? await accountRes.json() : null;
-      const report = reportRes.ok ? await reportRes.json() : null;
-
-      if (!account || !account.connected) {
-        setInsightsState({ kind: "no-connection" });
-        return;
-      }
-
-      const followerCount = account.snapshot?.follower_count ?? null;
-      const postCount = account.snapshot?.media_count ?? null;
-
-      if (report?.report) {
-        setInsightsState({
-          kind: "report",
-          followerCount,
-          postCount,
-          postsAnalyzed: report.report.postsAnalyzed,
-          generatedAt: report.report.generatedAt,
-          topPattern: report.report.patterns?.[0]?.title ?? null,
-        });
-      } else {
-        setInsightsState({ kind: "connected-no-report", followerCount, postCount });
-      }
-    } catch {
-      setInsightsState({ kind: "no-connection" });
-    }
-  }, []);
-
   useEffect(() => {
     async function init() {
       try {
         const { data: session } = await authClient.getSession();
-        if (!session) {
-          router.push("/auth");
-          return;
-        }
-        setUserEmail(session.user.email);
+        if (!session) { router.push("/auth"); return; }
         await loadPlanStatus();
-        loadInsightsSummary();
+        const data = await loadHome();
+        // New users who haven't dismissed setup land straight in onboarding.
+        const dismissed = (() => { try { return localStorage.getItem(ONBOARDING_DISMISSED_KEY) === "true"; } catch { return false; } })();
+        if (!data.enabled && !dismissed) setOnboardingOpen(true);
       } catch {
         router.push("/auth");
       } finally {
@@ -271,82 +341,26 @@ export default function AppPage() {
       }
     }
     init();
-  }, [router, loadPlanStatus, loadInsightsSummary]);
+  }, [router, loadPlanStatus, loadHome]);
 
-  // Register commands
+  // Command palette entries (kept consistent with the nav IA).
   useEffect(() => {
     const commands = [
-      {
-        id: "nav-dashboard",
-        label: "Dashboard",
-        category: "Navigation",
-        icon: <Sprout className="w-4 h-4" />,
-        keywords: ["home", "main"],
-        action: () => router.push("/app"),
-      },
-      {
-        id: "nav-settings",
-        label: "Settings",
-        category: "Navigation",
-        icon: <Settings className="w-4 h-4" />,
-        keywords: ["preferences", "account"],
-        action: () => router.push("/settings"),
-      },
-      {
-        id: "action-signout",
-        label: "Sign Out",
-        category: "Actions",
-        icon: <LogOut className="w-4 h-4" />,
-        keywords: ["logout", "exit"],
-        action: async () => {
-          await authClient.signOut();
-          router.push("/auth");
-        },
-      },
-      {
-        id: "action-theme-light",
-        label: "Switch to Light Mode",
-        category: "Actions",
-        icon: <Sun className="w-4 h-4" />,
-        keywords: ["theme", "appearance"],
-        action: () => {
-          localStorage.setItem("maddiehq-theme", "light");
-          document.documentElement.classList.remove("dark", "light");
-          document.documentElement.classList.add("light");
-          window.location.reload();
-        },
-      },
-      {
-        id: "action-theme-dark",
-        label: "Switch to Dark Mode",
-        category: "Actions",
-        icon: <Moon className="w-4 h-4" />,
-        keywords: ["theme", "appearance"],
-        action: () => {
-          localStorage.setItem("maddiehq-theme", "dark");
-          document.documentElement.classList.remove("dark", "light");
-          document.documentElement.classList.add("dark");
-          window.location.reload();
-        },
-      },
-      {
-        id: "action-theme-system",
-        label: "Use System Theme",
-        category: "Actions",
-        icon: <Monitor className="w-4 h-4" />,
-        keywords: ["theme", "appearance", "auto"],
-        action: () => {
-          localStorage.setItem("maddiehq-theme", "system");
-          window.location.reload();
-        },
-      },
+      { id: "nav-dashboard", label: "Home", category: "Navigation", icon: <Bot className="w-4 h-4" />, keywords: ["home", "coomander"], action: () => router.push("/app") },
+      { id: "nav-cadence", label: "Cadence", category: "Navigation", icon: <ListChecks className="w-4 h-4" />, keywords: ["ops", "plan", "beats", "pillars"], action: () => router.push("/app/cadence") },
+      { id: "nav-insights", label: "Insights", category: "Navigation", icon: <Sparkles className="w-4 h-4" />, keywords: ["analytics", "instagram", "reports"], action: () => router.push("/app/insights") },
+      { id: "nav-coomander-chat", label: "Chat with Coomander", category: "Navigation", icon: <MessageSquare className="w-4 h-4" />, keywords: ["agent", "assistant", "chat"], action: () => router.push("/app/chat") },
+      { id: "nav-settings", label: "Settings", category: "Navigation", icon: <Settings className="w-4 h-4" />, keywords: ["preferences", "account"], action: () => router.push("/settings") },
+      { id: "action-signout", label: "Sign Out", category: "Actions", icon: <LogOut className="w-4 h-4" />, keywords: ["logout", "exit"], action: async () => { await authClient.signOut(); router.push("/auth"); } },
+      { id: "action-theme-light", label: "Switch to Light Mode", category: "Actions", icon: <Sun className="w-4 h-4" />, keywords: ["theme"], action: () => { localStorage.setItem("coomander-theme", "light"); document.documentElement.classList.remove("dark", "light"); document.documentElement.classList.add("light"); window.location.reload(); } },
+      { id: "action-theme-dark", label: "Switch to Dark Mode", category: "Actions", icon: <Moon className="w-4 h-4" />, keywords: ["theme"], action: () => { localStorage.setItem("coomander-theme", "dark"); document.documentElement.classList.remove("dark", "light"); document.documentElement.classList.add("dark"); window.location.reload(); } },
+      { id: "action-theme-system", label: "Use System Theme", category: "Actions", icon: <Monitor className="w-4 h-4" />, keywords: ["theme", "auto"], action: () => { localStorage.setItem("coomander-theme", "system"); window.location.reload(); } },
     ];
-
     commandRegistry.registerAll(commands);
     return () => commands.forEach((c) => commandRegistry.unregister(c.id));
   }, [router]);
 
-  // Detect ?upgraded=1 and ?verified=1 params
+  // ?upgraded / ?verified handling.
   useEffect(() => {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
@@ -361,182 +375,61 @@ export default function AppPage() {
     }
   }, [loadPlanStatus]);
 
-  const handleLogout = async () => {
-    await authClient.signOut();
-    router.push("/auth");
-  };
-
-  const handleManageSubscription = async () => {
-    setPortalLoading(true);
-    try {
-      const res = await fetch("/api/stripe/portal");
-      if (res.ok) {
-        const data = await res.json();
-        if (data.url) window.location.href = data.url;
-      }
-    } catch {
-      toast.error("Could not open subscription portal");
-    } finally {
-      setPortalLoading(false);
-    }
-  };
+  const seedChat = (q: string) => router.push(`/app/chat?q=${encodeURIComponent(q)}`);
 
   if (authLoading) {
     return (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
+      <div className="min-h-[60vh] flex items-center justify-center">
         <Skeleton circle width="w-8" height="h-8" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-      {/* Onboarding for new users */}
-      <Onboarding plan={isPro ? "pro" : "free"} />
+    <>
+      <CoomanderOnboarding
+        open={onboardingOpen}
+        onClose={() => setOnboardingOpen(false)}
+        onComplete={() => { loadHome().catch(() => {}); }}
+      />
 
-      {/* Upgrade Modal */}
-      <Modal
-        open={showUpgradeModal}
-        onClose={() => setShowUpgradeModal(false)}
-        title="Upgrade to Pro"
-        titleIcon={<Star className="w-5 h-5 text-primary" />}
-      >
+      <Modal open={showUpgradeModal} onClose={() => setShowUpgradeModal(false)} title="Upgrade to Pro" titleIcon={<Star className="w-5 h-5 text-primary" />}>
         <UpgradeModalContent onDismiss={() => setShowUpgradeModal(false)} />
       </Modal>
 
-      {/* Header */}
-      <header className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-10">
-        <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Sprout className="w-6 h-6 text-primary" />
-            <span className="font-bold text-gray-900 dark:text-gray-100">MaddieHQ</span>
-          </div>
-          <div className="flex items-center gap-4">
-            <span className="text-xs text-gray-500 dark:text-gray-400 hidden sm:block">{userEmail}</span>
-            {isPro && (
-              <Badge variant="pro" icon={<Star className="w-3 h-3" />}>
-                Pro
-              </Badge>
-            )}
-            {isPro && (
-              <button
-                onClick={handleManageSubscription}
-                disabled={portalLoading}
-                className="text-xs text-gray-400 dark:text-gray-500 hover:text-primary/80 underline transition-colors hidden sm:block"
-              >
-                {portalLoading ? "Loading\u2026" : "Manage subscription"}
-              </button>
-            )}
-            <button
-              onClick={() => router.push("/app/chat")}
-              className="text-gray-400 hover:text-primary/80 transition-colors"
-              title="AI Chat"
-            >
-              <MessageSquare className="w-4 h-4" />
-            </button>
-            <NotificationBell />
-            <ThemeToggle compact />
-            <button
-              onClick={() => router.push("/settings")}
-              className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
-              title="Settings"
-            >
-              <Settings className="w-4 h-4" />
-            </button>
-            <button
-              onClick={handleLogout}
-              className="text-gray-400 hover:text-red-500 dark:hover:text-red-400 transition-colors"
-              title="Sign out"
-            >
-              <LogOut className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-      </header>
-
       <main className="max-w-4xl mx-auto px-4 py-6 space-y-6">
-        {/* Email verified banner */}
         {verifiedBanner && (
           <Alert variant="success" onDismiss={() => setVerifiedBanner(false)}>
             Your email has been verified. Welcome aboard!
           </Alert>
         )}
 
-        {/* Free plan upgrade banner */}
         {!isPro && !upgradeBannerDismissed && (
           <Alert variant="info" onDismiss={() => setUpgradeBannerDismissed(true)}>
             <span>
               You&apos;re on the free plan.{" "}
-              <button
-                onClick={() => setShowUpgradeModal(true)}
-                className="font-semibold underline hover:text-primary/80"
-              >
+              <button onClick={() => setShowUpgradeModal(true)} className="font-semibold underline hover:text-primary/80">
                 Upgrade to Pro &rarr;
               </button>
             </span>
           </Alert>
         )}
 
-        {/* Welcome */}
-        <Card padding="lg">
-          <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100 mb-1">
-            Welcome back{userEmail ? `, ${userEmail}` : ""}!
-          </h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400">
-            You&apos;re signed in and ready to build.{" "}
-            {isPro ? (
-              <span className="text-primary font-medium">You have Pro access.</span>
-            ) : (
-              <button
-                onClick={() => setShowUpgradeModal(true)}
-                className="text-primary font-medium hover:text-primary/80 underline"
-              >
-                Upgrade to Pro
-              </button>
-            )}
-          </p>
-        </Card>
+        {home?.enabled && home.brief ? (
+          <>
+            <AgentHero brief={home.brief} onAction={seedChat} />
+            <RecentThread messages={home.recentMessages} />
+            <SecondarySurfaces />
+          </>
+        ) : (
+          <>
+            <MeetCoomanderHero onStart={() => setOnboardingOpen(true)} />
+            <SecondarySurfaces />
+          </>
+        )}
 
-        {/* Pro-gated feature example */}
-        <Card
-          title="Pro Feature Example"
-          headerAction={
-            !isPro ? (
-              <Badge variant="default" icon={<Lock className="w-3 h-3" />}>
-                Pro only
-              </Badge>
-            ) : undefined
-          }
-        >
-          {isPro ? (
-            <div className="bg-accent rounded-xl p-4 text-center">
-              <p className="text-accent-foreground font-medium text-sm">
-                This is your Pro feature. Replace this with your actual Pro content.
-              </p>
-            </div>
-          ) : (
-            <div className="text-center py-8">
-              <Lock className="w-8 h-8 text-gray-300 dark:text-gray-600 mx-auto mb-3" />
-              <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-                This feature requires a Pro subscription.
-              </p>
-              <Button
-                variant="primary"
-                icon={<Star className="w-4 h-4" />}
-                onClick={() => setShowUpgradeModal(true)}
-              >
-                Upgrade to Pro
-              </Button>
-            </div>
-          )}
-        </Card>
-
-        {/* Insights card */}
-        <InsightsCard state={insightsState} />
-
-        {/* Bottom padding */}
         <div className="pb-8" />
       </main>
-    </div>
+    </>
   );
 }

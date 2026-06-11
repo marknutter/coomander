@@ -48,6 +48,17 @@ export const postInsights = mod.postInsights;
 export const accountSnapshots = mod.accountSnapshots;
 export const demographics = mod.demographics;
 export const contentInsights = mod.contentInsights;
+export const coomanderSettings = mod.coomanderSettings;
+export const coomanderMessageLog = mod.coomanderMessageLog;
+export const coomanderUsage = mod.coomanderUsage;
+export const coomanderDayState = mod.coomanderDayState;
+export const coomanderDedup = mod.coomanderDedup;
+export const cadencePillars = mod.cadencePillars;
+export const cadenceBeats = mod.cadenceBeats;
+export const contentStates = mod.contentStates;
+export const drops = mod.drops;
+export const procurementItems = mod.procurementItems;
+export const weeklyReviews = mod.weeklyReviews;
 
 export type {
   Platform,
@@ -64,4 +75,27 @@ export type {
   NewDemographic,
   ContentInsight,
   NewContentInsight,
+  CoomanderSettings,
+  NewCoomanderSettings,
+  CoomanderMessageLog,
+  NewCoomanderMessageLog,
+  CoomanderUsage,
+  NewCoomanderUsage,
+  CoomanderDayState,
+  NewCoomanderDayState,
+  CoomanderDedup,
+  NewCoomanderDedup,
+  ContentStateValue,
+  CadencePillar,
+  NewCadencePillar,
+  CadenceBeat,
+  NewCadenceBeat,
+  ContentState,
+  NewContentState,
+  Drop,
+  NewDrop,
+  ProcurementItem,
+  NewProcurementItem,
+  WeeklyReviewRow,
+  NewWeeklyReviewRow,
 } from "./schema.sqlite";

@@ -16,6 +16,7 @@ import {
   InstagramAuthError,
   markTokenExpired,
 } from "@/lib/platforms/instagram";
+import { onNewInstagramPost } from "@/lib/coomander/autoDrop";
 
 const PLATFORM = "instagram";
 
@@ -91,6 +92,15 @@ export async function syncInstagramPosts(
           })
           .returning({ id: posts.id });
         postId = inserted[0].id;
+
+        // Coomander auto-drop (#152): attribute the new post to a content beat
+        // and confirm over Telegram. Best-effort — never breaks the sync.
+        await onNewInstagramPost(userId, {
+          mediaId: media.id,
+          mediaType: media.mediaType,
+          caption: media.caption,
+          permalink: media.permalink,
+        });
       }
 
       postsUpserted++;

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Cookie, X } from "lucide-react";
 import { cn } from "@/lib/cn";
 
-const COOKIE_CONSENT_KEY = "maddiehq-cookie-consent";
+const COOKIE_CONSENT_KEY = "coomander-cookie-consent";
 
 export type CookiePreference = "all" | "essential" | null;
 

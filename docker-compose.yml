@@ -1,3 +1,8 @@
+# Compose project name → prefixes the network and named volumes
+# (coomander_default, coomander_node_modules, coomander_caddy_state).
+# Pinned so it doesn't derive from the folder name (still "maddiehq" for now).
+name: coomander
+
 services:
   # ── Caddy + Tailscale sidecar ───────────────────────────────────────────
   # Joins the tailnet as ${TS_HOSTNAME}, gets a real HTTPS cert from
@@ -6,11 +11,11 @@ services:
   # HTTPS — this is the only path that works for phone QA.
   caddy-dev:
     image: ghcr.io/tailscale/caddy-tailscale:main
-    container_name: maddiehq-caddy-dev
-    hostname: ${TS_HOSTNAME:-maddiehq}
+    container_name: coomander-caddy-dev
+    hostname: ${TS_HOSTNAME:-coomander}
     environment:
       TS_AUTHKEY: ${TS_AUTHKEY:-}
-      TS_HOSTNAME: ${TS_HOSTNAME:-maddiehq}
+      TS_HOSTNAME: ${TS_HOSTNAME:-coomander}
       # Bypass OrbStack's HTTP proxy for tsnet → controlplane traffic.
       # Without this, the proxy can re-emit the registration CONNECT and
       # tsnet creates a duplicate device (one canonical + one `-N` orphan).
@@ -36,7 +41,7 @@ services:
     build:
       context: ./node
       dockerfile: Dockerfile.dev
-    container_name: maddiehq-dev
+    container_name: coomander-dev
     network_mode: service:caddy-dev
     depends_on:
       - caddy-dev
@@ -50,7 +55,7 @@ services:
     env_file: ./node/.env.local
     environment:
       NODE_ENV: development
-      DATABASE_PATH: /app/data/maddiehq.db
+      DATABASE_PATH: /app/data/coomander.db
       BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:3005}
       APP_URL: ${APP_URL:-http://localhost:3005}
       WATCHPACK_POLLING: "true"

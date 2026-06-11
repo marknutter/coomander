@@ -10,7 +10,7 @@ interface SubscriptionCancelledEmailProps {
 }
 
 export default function SubscriptionCancelledEmail({
-  appName = "MaddieHQ",
+  appName = "Coomander",
   appUrl = "https://YOUR_DOMAIN",
   unsubscribeUrl,
 }: SubscriptionCancelledEmailProps) {

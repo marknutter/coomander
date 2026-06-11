@@ -1,4 +1,4 @@
-# CLAUDE.md — MaddieHQ
+# CLAUDE.md — Coomander
 
 **Read `AGENTS.md` first.** It describes everything already implemented in this template so you don't rebuild it.
 
@@ -102,14 +102,14 @@ export async function GET(request: Request) {
 Three Claude Code skills live in `.claude/skills/` — install them globally once:
 
 ```bash
-cp -r .claude/skills/maddiehq-create  ~/.claude/skills/
-cp -r .claude/skills/maddiehq-sync    ~/.claude/skills/
+cp -r .claude/skills/coomander-create  ~/.claude/skills/
+cp -r .claude/skills/coomander-sync    ~/.claude/skills/
 cp -r .claude/skills/configure-sso   ~/.claude/skills/
 ```
 
-**`/maddiehq-create`** — use to bootstrap a brand new project from the MaddieHQ template. Interviews you for project name, description, and ports, then copies the template, customizes all branding and landing page copy, sets up Docker, generates env vars, runs migrations, and verifies the build. Dead simple.
+**`/coomander-create`** — use to bootstrap a brand new project from the Coomander template. Interviews you for project name, description, and ports, then copies the template, customizes all branding and landing page copy, sets up Docker, generates env vars, runs migrations, and verifies the build. Dead simple.
 
-**`/maddiehq-sync`** — use from any downstream project to pull MaddieHQ improvements in. Runs parallel exploration, diffs both repos, presents a checklist, creates a GH issue and branch.
+**`/coomander-sync`** — use from any downstream project to pull Coomander improvements in. Runs parallel exploration, diffs both repos, presents a checklist, creates a GH issue and branch.
 
 **`/configure-sso`** — use when setting up OAuth providers on a new deployment. Fully automates Microsoft via `az` CLI; walks through Google, GitHub, Facebook, and Apple step-by-step, writing all credentials to `.env.local` automatically. For Microsoft-only without Claude Code: `bash scripts/configure-microsoft-sso.sh`.
 
@@ -123,8 +123,8 @@ bash scripts/install-openclaw-skills.sh
 
 Or manually:
 ```bash
-cp -r .openclaw/skills/maddiehq-create  ~/.openclaw/skills/
-cp -r .openclaw/skills/maddiehq-sync    ~/.openclaw/skills/
+cp -r .openclaw/skills/coomander-create  ~/.openclaw/skills/
+cp -r .openclaw/skills/coomander-sync    ~/.openclaw/skills/
 cp -r .openclaw/skills/configure-sso   ~/.openclaw/skills/
 ```
 
@@ -211,7 +211,7 @@ breaking: false
 Description of what changed.
 ```
 
-**Sync cursor:** Each downstream project has a `.maddiehq-sync-cursor` file recording when it was created and last synced. Agents read this to filter changelog entries.
+**Sync cursor:** Each downstream project has a `.coomander-sync-cursor` file recording when it was created and last synced. Agents read this to filter changelog entries.
 
 **When to add an entry:** After merging any functional change to main. One entry per PR/feature.
 

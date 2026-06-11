@@ -13,7 +13,7 @@ import { signUp, signIn, uniqueEmail, TEST_PASSWORD } from "./helpers";
 test.describe("Auth page — smoke tests", () => {
   test("shows the auth page with Sign In / Sign Up tabs", async ({ page }) => {
     await page.goto("/auth");
-    await expect(page).toHaveTitle(/MaddieHQ/i);
+    await expect(page).toHaveTitle(/Coomander/i);
 
     const signUpTab = page.getByRole("button", { name: /sign up/i });
     const signInTab = page.getByRole("button", { name: /sign in/i });
@@ -36,7 +36,7 @@ test.describe("Auth page — smoke tests", () => {
 
   test("landing page loads for unauthenticated users", async ({ page }) => {
     await page.goto("/");
-    await expect(page).toHaveTitle(/MaddieHQ/i);
+    await expect(page).toHaveTitle(/Coomander/i);
   });
 
   test("shows validation error for empty email on signup", async ({ page }) => {
