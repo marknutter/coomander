@@ -74,3 +74,9 @@ Remaining nuance for **Fix B**: *"posted 2 gym reels"* still asks Normal/Trial (
 ## Session 2f (2026-06-16) — Fix B shipped (quantity + multi-action)
 
 Owner re-tested earlier: "posted 2 gym reels" → "trial reels" logged only 1 (quantity dropped). Implemented Fix B (#181, deployed worker 11baf94b): `log_drop` gains `count` (default 1, clamped 1-20); the inbound classifier processes ALL tool_use blocks and `handleInbound` runs each. So same-beat quantities use one `log_drop` with count=N, and compound messages ("a reel and 3 wall clips") log multiple items. Typecheck + 460 tests green. Awaiting owner re-test.
+
+## Session 2g (2026-06-16) — ✅ Fix B verified
+
+Owner re-tested as Maddie: "posted two reels" → "trial reels" → **"Logged 2. Counted toward Trial reel."** Drops now: Trial reel 3 (was 1, +2 from the count=2 log), Normal reel 1, total 4. Quantity honored end-to-end. (Compound "a reel + 3 wall clips" not yet exercised; one "posted 2 gym reels" clarification left unanswered — harmless.)
+
+**State of the manager loop:** outbound pings, inbound classify→log (incl. quantity + multi-action), and the shared web/Telegram thread all work on prod. Remaining build item: the in-app Telegram link flow (still #1 gap). Optional for real management: connect Maddie's IG; tune cadence to her real numbers.
