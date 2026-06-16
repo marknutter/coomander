@@ -52,6 +52,17 @@ Root cause (`lib/coomander/inbound.ts:314`): the inbound classifier calls Anthro
 
 **Proposed fix:** (A) inject recent thread into the inbound classifier (parity with `handleChatTurn` via `recentTurns`) so clarification answers resolve — small, high-impact. (B) support multiple actions per message (loop over tool_use blocks) — larger, separate.
 
+## Session 2e (2026-06-16) — ✅ Fix A verified working
+
+Deployed Fix A to prod (worker `30aff6c3`). Owner re-tested as Maddie:
+- *"posted a normal reel"* → `log_drop` → "Logged. Counted toward Normal reel." ✅
+- *"trial reels"* (a clarification answer) → `log_drop` → "Logged. Counted toward Trial reel." ✅ — the exact path that produced 0 drops before now resolves.
+- **2 drops logged** on prod. The core "tell Coomander what you shipped → it logs it" loop works over Telegram.
+
+Remaining nuance for **Fix B**: *"posted 2 gym reels"* still asks Normal/Trial (fine), and quantity isn't honored (logs 1 drop, not 2); compound multi-item messages still need the multi-action change.
+
+**Viewing surface:** the manager logs in at `coomander.com` as the seeded creator account (`maddie@coomander.com`) → `/app/cadence` shows beats with drops counted; `/app` shows the TodayModel brief. (No in-app Telegram linking still the top product gap.)
+
 ## Findings / friction
 
 1. **No in-app way to link a creator's Telegram.** The onboarding "link Telegram" step is informational only — there's no link-code flow, so a manager onboarding a creator has to set `telegramChatId` directly in the DB. This is the #1 gap for the managed model: the manager can't connect the creator's comms channel through the product. (Surfaced when building #173; confirmed now in practice.)
@@ -59,3 +70,7 @@ Root cause (`lib/coomander/inbound.ts:314`): the inbound classifier calls Anthro
 3. **Instagram not connected** → auto-drops + insights are inert until the creator's real IG is OAuth'd. The cadence/agent/chat loop still works fully via manual drop logging.
 4. **Cadence is generic defaults.** Real management requires tuning the seeded playbook to Maddie's actual operation (her real weekly targets, which platforms, current content situation).
 5. (Carryover) `/changelog` 500s in prod; video reel analysis is deployed but unverified end-to-end.
+
+## Session 2f (2026-06-16) — Fix B shipped (quantity + multi-action)
+
+Owner re-tested earlier: "posted 2 gym reels" → "trial reels" logged only 1 (quantity dropped). Implemented Fix B (#181, deployed worker 11baf94b): `log_drop` gains `count` (default 1, clamped 1-20); the inbound classifier processes ALL tool_use blocks and `handleInbound` runs each. So same-beat quantities use one `log_drop` with count=N, and compound messages ("a reel and 3 wall clips") log multiple items. Typecheck + 460 tests green. Awaiting owner re-test.
