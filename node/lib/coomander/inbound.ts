@@ -15,6 +15,7 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import { logCoomanderUsage } from "./usage";
+import { listMessages } from "./coomanderMessages";
 import { listBeats } from "./beats";
 import { listContent, transitionContent, CONTENT_STATES, isValidTransition } from "./contentStates";
 import { logDrop, type DropKind } from "./drops";
@@ -305,10 +306,21 @@ export async function executeAction(userId: string, action: ResolvedAction, ctx:
 
 async function classifyMessage(userId: string, text: string, ctx: InboundContext, personaMode: PersonaMode): Promise<ClassifiedTool | null> {
   const client = new Anthropic();
+  // Inject the recent thread (oldest-first) so a clarification answer resolves
+  // against the message that prompted it — e.g. "normal reels" right after
+  // "posted 2 gym reels" must log a drop, not ask again. The current inbound
+  // message is persisted only AFTER this runs (see the webhook), so it is not
+  // duplicated here. Parity with coomanderChat.handleChatTurn.
+  const recent = await listMessages(userId, 10);
+  const history = recent.length
+    ? `\n\nRecent conversation (oldest first):\n${recent
+        .map((m) => `${m.direction === "inbound" ? "creator" : "coomander"}: ${m.text}`)
+        .join("\n")}\n\nIf the newest message answers a clarification you just asked, combine it with that earlier context and take the action — do not ask the same question again.`
+    : "";
   const msg = await client.messages.create({
     model: MODEL,
     max_tokens: 300,
-    system: [{ type: "text", text: systemPrompt(ctx, personaMode, todayUTC()), cache_control: { type: "ephemeral" } }],
+    system: [{ type: "text", text: systemPrompt(ctx, personaMode, todayUTC()) + history, cache_control: { type: "ephemeral" } }],
     tool_choice: { type: "any" },
     tools: tools(),
     messages: [{ role: "user", content: text }],
