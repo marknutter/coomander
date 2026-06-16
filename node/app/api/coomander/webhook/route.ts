@@ -81,7 +81,7 @@ export async function POST(request: Request) {
     await sendTelegram(chatId, result.reply);
     await appendMessage(userId, "outbound", result.reply, { personaMode: settings.personaMode }).catch(() => {});
 
-    return NextResponse.json({ ok: true, classified: result.toolCall?.toolName ?? null });
+    return NextResponse.json({ ok: true, classified: result.toolCall?.map((t) => t.toolName).join(",") ?? null });
   } catch (e) {
     // Always 200 so Telegram does not retry-storm.
     log.error("[POST /api/coomander/webhook]", { error: e instanceof Error ? e.message : String(e) });
