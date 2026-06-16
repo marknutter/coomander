@@ -48,7 +48,8 @@ export interface ClassifiedTool {
 
 export interface InboundResult {
   reply: string;
-  toolCall: ClassifiedTool | null;
+  /** The classifier tool-call(s) taken for this message (one per action). */
+  toolCall: ClassifiedTool[] | null;
   /** True when a domain row was actually written. */
   acted: boolean;
 }
@@ -72,6 +73,7 @@ export function tools(): Anthropic.Tool[] {
         properties: {
           beat_id: { type: "string", description: "id of the matched beat (from the list provided)." },
           kind: { type: "string", enum: ["shipped", "captured", "completed"], description: "shipped=posted; captured=shot for the wall buffer; completed=other task." },
+          count: { type: "integer", minimum: 1, description: "How many of THIS beat were shipped/captured in this message (e.g. 'posted 2 reels' -> 2). Defaults to 1. Use one log_drop with count=N for N of the same beat; use separate log_drop calls for different beats." },
           platform: { type: "string", enum: ["ig", "tiktok", "fb", "snap", "of"], description: "Platform, if stated or obvious." },
           notes: { type: "string", description: "Optional free text." },
         },
@@ -169,7 +171,7 @@ function contextString(ctx: InboundContext): string {
 }
 
 function systemPrompt(ctx: InboundContext, personaMode: PersonaMode, today: string): string {
-  return `You are Coomander, the AI operations manager inside Coomander (an OnlyFans creator app). Today is ${today}. Turn the creator's Telegram message into exactly one tool call. ${
+  return `You are Coomander, the AI operations manager inside Coomander (an OnlyFans creator app). Today is ${today}. Turn the creator's Telegram message into one or more tool calls — one per DISTINCT action. If they did several different things in one message, emit a tool call for each. For multiple of the SAME beat (e.g. "posted 2 reels"), use a single log_drop with count=2. ${
     personaMode === "operational" ? "Be terse." : "Be warm and direct."
   }
 
@@ -184,7 +186,7 @@ Rules:
 // ── Pure validation ────────────────────────────────────────────────────────────
 
 export type ResolvedAction =
-  | { kind: "log_drop"; beatId: string; dropKind: DropKind; platform?: string; notes?: string }
+  | { kind: "log_drop"; beatId: string; dropKind: DropKind; count: number; platform?: string; notes?: string }
   | { kind: "advance"; contentId: string; newState: ContentStateValue; notes?: string }
   | { kind: "log_purchase"; itemId: string; actualCostCents?: number; notes?: string }
   | { kind: "add_procurement"; category: ProcurementCategory; label: string; neededBy?: string; notes?: string }
@@ -207,7 +209,9 @@ export function resolveToolUse(toolName: string, input: Record<string, unknown>,
       if (!beatExists(beatId)) return { kind: "clarify", reply: FALLBACK_REPLY };
       const k = str(input.kind);
       const dropKind: DropKind = (["shipped", "captured", "completed"] as readonly string[]).includes(k) ? (k as DropKind) : "shipped";
-      return { kind: "log_drop", beatId, dropKind, platform: str(input.platform) || undefined, notes: str(input.notes) || undefined };
+      const cnt = Number(input.count);
+      const count = Number.isFinite(cnt) && cnt >= 1 ? Math.min(Math.round(cnt), 20) : 1;
+      return { kind: "log_drop", beatId, dropKind, count, platform: str(input.platform) || undefined, notes: str(input.notes) || undefined };
     }
     case TOOLS.ADVANCE: {
       const contentId = str(input.content_id);
@@ -260,20 +264,23 @@ export async function executeAction(userId: string, action: ResolvedAction, ctx:
       return { reply: action.reply, acted: false };
     case "log_drop": {
       const beat = ctx.beats.find((b) => b.id === action.beatId)!;
-      await logDrop(userId, {
-        beatId: action.beatId,
-        kind: action.dropKind,
-        source: "telegram",
-        platform: (action.platform as never) ?? beat.platform_specific ?? null,
-        payload: action.notes ? { notes: action.notes } : undefined,
-      });
+      for (let i = 0; i < action.count; i++) {
+        await logDrop(userId, {
+          beatId: action.beatId,
+          kind: action.dropKind,
+          source: "telegram",
+          platform: (action.platform as never) ?? beat.platform_specific ?? null,
+          payload: action.notes ? { notes: action.notes } : undefined,
+        });
+      }
       // Soft wall-content prohibition warnings on a capture (#153).
       let warn = "";
       if (action.dropKind === "captured") {
         const ws = checkWallProhibitions(action.notes);
         if (ws.length) warn = " " + ws.map((w) => w.message).join(" ");
       }
-      return { reply: `Logged. Counted toward ${beat.name}.${warn}`, acted: true };
+      const n = action.count > 1 ? ` ${action.count}` : "";
+      return { reply: `Logged${n}. Counted toward ${beat.name}.${warn}`, acted: true };
     }
     case "advance": {
       const res = await transitionContent(userId, action.contentId, action.newState, action.notes ?? null);
@@ -304,7 +311,7 @@ export async function executeAction(userId: string, action: ResolvedAction, ctx:
 
 // ── Anthropic classification ───────────────────────────────────────────────────
 
-async function classifyMessage(userId: string, text: string, ctx: InboundContext, personaMode: PersonaMode): Promise<ClassifiedTool | null> {
+async function classifyMessage(userId: string, text: string, ctx: InboundContext, personaMode: PersonaMode): Promise<ClassifiedTool[]> {
   const client = new Anthropic();
   // Inject the recent thread (oldest-first) so a clarification answer resolves
   // against the message that prompted it — e.g. "normal reels" right after
@@ -326,9 +333,9 @@ async function classifyMessage(userId: string, text: string, ctx: InboundContext
     messages: [{ role: "user", content: text }],
   });
   await logCoomanderUsage(userId, "inbound", MODEL, msg.usage?.input_tokens, msg.usage?.output_tokens);
-  const block = msg.content.find((b): b is Anthropic.ToolUseBlock => b.type === "tool_use");
-  if (!block) return null;
-  return { toolName: block.name, input: (block.input ?? {}) as Record<string, unknown> };
+  return msg.content
+    .filter((b): b is Anthropic.ToolUseBlock => b.type === "tool_use")
+    .map((b) => ({ toolName: b.name, input: (b.input ?? {}) as Record<string, unknown> }));
 }
 
 /** Load the classifier context (active beats, unshipped content, open procurement). */
@@ -352,8 +359,16 @@ export async function loadContext(userId: string): Promise<InboundContext> {
 export async function handleInbound(userId: string, text: string, personaMode: PersonaMode = "light_companion"): Promise<InboundResult> {
   const ctx = await loadContext(userId);
   const classified = await classifyMessage(userId, text, ctx, personaMode);
-  if (!classified) return { reply: FALLBACK_REPLY, toolCall: null, acted: false };
-  const action = resolveToolUse(classified.toolName, classified.input, ctx);
-  const { reply, acted } = await executeAction(userId, action, ctx);
-  return { reply, toolCall: classified, acted };
+  if (!classified.length) return { reply: FALLBACK_REPLY, toolCall: null, acted: false };
+  // Execute every action in the message (e.g. "posted a reel and shot 3 wall
+  // clips" -> two calls), aggregating the replies.
+  const replies: string[] = [];
+  let acted = false;
+  for (const c of classified) {
+    const action = resolveToolUse(c.toolName, c.input, ctx);
+    const res = await executeAction(userId, action, ctx);
+    replies.push(res.reply);
+    acted = acted || res.acted;
+  }
+  return { reply: replies.join(" "), toolCall: classified, acted };
 }
