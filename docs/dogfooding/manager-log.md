@@ -80,3 +80,11 @@ Owner re-tested earlier: "posted 2 gym reels" → "trial reels" logged only 1 (q
 Owner re-tested as Maddie: "posted two reels" → "trial reels" → **"Logged 2. Counted toward Trial reel."** Drops now: Trial reel 3 (was 1, +2 from the count=2 log), Normal reel 1, total 4. Quantity honored end-to-end. (Compound "a reel + 3 wall clips" not yet exercised; one "posted 2 gym reels" clarification left unanswered — harmless.)
 
 **State of the manager loop:** outbound pings, inbound classify→log (incl. quantity + multi-action), and the shared web/Telegram thread all work on prod. Remaining build item: the in-app Telegram link flow (still #1 gap). Optional for real management: connect Maddie's IG; tune cadence to her real numbers.
+
+## Session 3 (2026-06-17) — 🔴 TIMEZONE BUG: "today" is UTC, not the creator's local day
+
+Evening ping said *"Nothing shipped today, zero across the board"* at 8:00 PM CT — but 2 trial reels + a normal reel were logged at 3:13–3:43 PM CT the same day. Cause: drops were stamped **2026-06-16 ~20:xx UTC**; by 8 PM CT it was already **2026-06-17 UTC**, and `getTodayModel`/"shipped today" use `todayUTC()`. So the **day boundary is UTC midnight = ~6–7 PM US Central** — a creator's afternoon/evening work counts toward the next day, "shipped today" resets mid-evening, and the evening cron (`0 1 * * *` = 01:00 UTC = 8 PM CDT) fires into a fresh empty day.
+
+Scope: everything keys off `todayUTC()` — TodayModel drop attribution, "shipped today", `daysSinceStart` (ramp), weekly-review windows. Affects every non-UTC creator (Maddie is US Central).
+
+**Fix (proposed):** add a per-user timezone (default `America/Chicago`); compute "today"/day-boundaries/week-start in the creator's local tz instead of UTC. That fixes the day attribution + "nothing shipped today" + makes the 8 PM CT evening ping see the correct local day. **Separate/larger:** firing the cron pings at the creator's *local* times (currently fixed UTC, drifts with DST) — the direction doc's "per-user local scheduling" TODO; defer.
