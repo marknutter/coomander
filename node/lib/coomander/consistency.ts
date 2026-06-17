@@ -11,6 +11,25 @@ export function toDateUTC(unixSeconds: number): string {
   return new Date(unixSeconds * 1000).toISOString().slice(0, 10);
 }
 
+/**
+ * Per-creator timezone day boundary (#183). All "today"/day-bucketing in the ops
+ * layer is the creator's LOCAL calendar day, not UTC — otherwise a US creator's
+ * day rolls over at ~6-7pm local (UTC midnight) and evening work counts as
+ * tomorrow. Ported from geology's floor.ts: `en-CA` renders YYYY-MM-DD, and
+ * forcing `timeZone` makes it independent of the server's clock.
+ */
+export const DEFAULT_TIMEZONE = process.env.COOMANDER_TIMEZONE || "America/Chicago";
+
+/** Today's date as YYYY-MM-DD in an IANA timezone. */
+export function todayLocal(tz: string = DEFAULT_TIMEZONE, now: Date = new Date()): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
+}
+
+/** Local YYYY-MM-DD (in tz) for a unix-seconds timestamp. */
+export function toDateLocal(unixSeconds: number, tz: string = DEFAULT_TIMEZONE): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(unixSeconds * 1000));
+}
+
 /** Whole days from a → b (both YYYY-MM-DD). Positive if b is after a. */
 export function daysBetween(a: string, b: string): number {
   const da = Date.parse(a + "T00:00:00Z");

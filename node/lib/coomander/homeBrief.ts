@@ -14,7 +14,7 @@ import type { TodayModel } from "./todayModel";
 import { getTodayModel } from "./todayModel";
 import { daysSinceStart } from "./agent";
 import { expectedToday, inRamp, RAMP_DAYS } from "./ramp";
-import { todayUTC } from "./scheduling";
+import { userToday } from "./settings";
 
 export interface HomeBeatLine {
   beatId: string;
@@ -132,7 +132,7 @@ function headlineFor(
 }
 
 export async function getHomeBrief(userId: string, date?: string): Promise<HomeBrief> {
-  const d = date ?? todayUTC();
+  const d = date ?? await userToday(userId);
   const [model, daysIn] = await Promise.all([
     getTodayModel(userId, d),
     daysSinceStart(userId, d),

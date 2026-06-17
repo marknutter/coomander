@@ -17,7 +17,7 @@ import crypto from "crypto";
 import { eq } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { cadencePillars, cadenceBeats, coomanderSettings } from "@/lib/schema";
-import { todayUTC } from "./scheduling";
+import { userToday } from "./settings";
 
 const SOURCE = "v1_default";
 
@@ -121,7 +121,7 @@ export async function seedOpsDefaults(userId: string): Promise<SeedResult> {
   if (existing.length > 0) return { seeded: false, reason: "user already has pillars" };
 
   const now = Math.floor(Date.now() / 1000);
-  const today = todayUTC();
+  const today = await userToday(userId);
   let pillarCount = 0;
   let beatCount = 0;
 

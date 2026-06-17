@@ -438,6 +438,8 @@ export const coomanderSettings = pgTable("coomander_settings", {
   nag_frequency: text("nag_frequency").notNull().default("tight"),
   persona_mode: text("persona_mode").notNull().default("light_companion"),
   ping_times_json: text("ping_times_json"),
+  // IANA timezone for the creator's local day boundary (#183). NULL -> DEFAULT_TIMEZONE.
+  timezone: text("timezone"),
   companion_consent_at: integer("companion_consent_at"),
   ops_seeded_at: integer("ops_seeded_at"),
   defaults_banner_dismissed_at: integer("defaults_banner_dismissed_at"),

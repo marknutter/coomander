@@ -12,8 +12,9 @@
  */
 
 import { computeBeatStatus, type BeatStatus } from "./beats";
-import { contentCushionDays, daysBetween, toDateUTC } from "./consistency";
-import { todayUTC } from "./scheduling";
+import { contentCushionDays, daysBetween, toDateLocal, todayLocal } from "./consistency";
+import { getDayState } from "./scheduling";
+import { getTimezone } from "./settings";
 import type {
   CadencePillar,
   CadenceBeat,
@@ -27,7 +28,6 @@ import { listBeats } from "./beats";
 import { listContent } from "./contentStates";
 import { listDrops } from "./drops";
 import { listProcurement } from "./procurement";
-import { getDayState } from "./scheduling";
 import { splitUrgent } from "./procurement";
 
 export interface TodayBeat {
@@ -70,8 +70,8 @@ function weekStart(date: string): string {
   return new Date(t).toISOString().slice(0, 10);
 }
 
-function dropDate(d: Drop): string {
-  return toDateUTC(d.dropped_at);
+function dropDate(d: Drop, tz: string): string {
+  return toDateLocal(d.dropped_at, tz);
 }
 
 /** Whether a drop counts toward a beat (matching id + platform constraint). */
@@ -85,6 +85,8 @@ function dropMatchesBeat(d: Drop, beat: CadenceBeat): boolean {
 
 export interface TodayInputs {
   date: string;
+  /** IANA timezone for bucketing drop timestamps to the creator's local day (#183). */
+  tz: string;
   pillars: CadencePillar[];
   beats: CadenceBeat[];
   drops: Drop[];
@@ -94,9 +96,10 @@ export interface TodayInputs {
 }
 
 export function buildTodayModel(inputs: TodayInputs): TodayModel {
-  const { date, pillars, beats, drops, content, procurement, dayQuality } = inputs;
+  const { date, tz, pillars, beats, drops, content, procurement, dayQuality } = inputs;
   const ws = weekStart(date);
   const dow = dayOfWeekMon(date);
+  const dropDay = (d: Drop): string => dropDate(d, tz);
 
   const beatsByPillar = new Map<string, CadenceBeat[]>();
   for (const b of beats) {
@@ -108,15 +111,15 @@ export function buildTodayModel(inputs: TodayInputs): TodayModel {
   const todayPillars: TodayPillar[] = pillars.map((pillar) => {
     const pBeats = (beatsByPillar.get(pillar.id) ?? []).map((beat): TodayBeat => {
       const beatDrops = drops.filter((d) => dropMatchesBeat(d, beat));
-      const actualToday = beatDrops.filter((d) => dropDate(d) === date).length;
+      const actualToday = beatDrops.filter((d) => dropDay(d) === date).length;
 
       if (beat.cadence_kind === "daily") {
         const res = computeBeatStatus({ cadenceKind: "daily", targetCount: beat.target_count, actualToday });
-        return { beat, expected_today: res.expected_today, actual_today: actualToday, status: res.status, streak_days: streakForBeat(beatDrops, date) };
+        return { beat, expected_today: res.expected_today, actual_today: actualToday, status: res.status, streak_days: streakForBeat(beatDrops, date, tz) };
       }
 
       if (beat.cadence_kind === "weekly") {
-        const actualWindow = beatDrops.filter((d) => { const dd = dropDate(d); return dd >= ws && dd <= date; }).length;
+        const actualWindow = beatDrops.filter((d) => { const dd = dropDay(d); return dd >= ws && dd <= date; }).length;
         const res = computeBeatStatus({ cadenceKind: "weekly", targetCount: beat.target_count, actualToday, actualWindow, dayOfWeek: dow });
         return { beat, expected_today: res.expected_today, actual_today: actualToday, status: res.status };
       }
@@ -124,7 +127,7 @@ export function buildTodayModel(inputs: TodayInputs): TodayModel {
       if (beat.cadence_kind === "window") {
         const start = beat.window_start ?? date;
         const end = beat.window_end ?? date;
-        const actualWindow = beatDrops.filter((d) => { const dd = dropDate(d); return dd >= start && dd <= end; }).length;
+        const actualWindow = beatDrops.filter((d) => { const dd = dropDay(d); return dd >= start && dd <= end; }).length;
         const totalDays = Math.max(1, daysBetween(start, end) + 1);
         const daysRemaining = Math.max(0, daysBetween(date, end));
         const res = computeBeatStatus({ cadenceKind: "window", targetCount: beat.target_count, actualToday, actualWindow, windowDaysRemaining: daysRemaining, windowTotalDays: totalDays });
@@ -145,14 +148,14 @@ export function buildTodayModel(inputs: TodayInputs): TodayModel {
   // Content pipeline counts.
   const pipeline = { drafted: 0, shot: 0, approved: 0, uploaded_to_edit: 0, edited: 0, scheduled: 0, shipped: 0 } as Record<ContentStateValue, number>;
   for (const c of content) pipeline[c.current_state]++;
-  const shippedToday = drops.filter((d) => d.kind === "shipped" && dropDate(d) === date).length;
+  const shippedToday = drops.filter((d) => d.kind === "shipped" && dropDay(d) === date).length;
 
   // Content cushion days.
   const readyCount = pipeline.approved + pipeline.scheduled;
   const dailyTarget = beats
     .filter((b) => b.cadence_kind === "daily" && (b.platform_specific !== "of"))
     .reduce((s, b) => s + b.target_count, 0);
-  const shippedDates = drops.filter((d) => d.kind === "shipped").map(dropDate).sort();
+  const shippedDates = drops.filter((d) => d.kind === "shipped").map(dropDay).sort();
   const lastShip = shippedDates.length ? shippedDates[shippedDates.length - 1] : null;
   const sinceLast = lastShip ? Math.max(0, daysBetween(lastShip, date)) : 0;
   const cushion = contentCushionDays({ readyCount, dailyTarget, daysSinceLastDrop: sinceLast });
@@ -181,8 +184,8 @@ export function buildTodayModel(inputs: TodayInputs): TodayModel {
 }
 
 /** Streak of consecutive days (ending today/yesterday) with a drop for this beat. */
-function streakForBeat(beatDrops: Drop[], today: string): number {
-  const days = new Set(beatDrops.map(dropDate));
+function streakForBeat(beatDrops: Drop[], today: string, tz: string): number {
+  const days = new Set(beatDrops.map((d) => dropDate(d, tz)));
   // inline of consistency.streakDays to avoid an extra import cycle for one call
   const shift = (d: string, n: number) => new Date(Date.parse(d + "T00:00:00Z") + n * 86400000).toISOString().slice(0, 10);
   let cursor: string;
@@ -197,7 +200,8 @@ function streakForBeat(beatDrops: Drop[], today: string): number {
 // ── async fetcher ─────────────────────────────────────────────────────────────
 
 export async function getTodayModel(userId: string, date?: string): Promise<TodayModel> {
-  const d = date ?? todayUTC();
+  const tz = await getTimezone(userId);
+  const d = date ?? todayLocal(tz);
   const [pillars, beats, content, drops, procurement, dayState] = await Promise.all([
     listPillars(userId),
     listBeats(userId),
@@ -208,6 +212,7 @@ export async function getTodayModel(userId: string, date?: string): Promise<Toda
   ]);
   return buildTodayModel({
     date: d,
+    tz,
     pillars,
     beats,
     content,
