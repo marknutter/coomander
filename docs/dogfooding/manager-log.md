@@ -106,3 +106,7 @@ This closes the recurring #1 dogfooding gap — onboarding a creator's comms no 
 Fired a manual weekly review for Maddie (weekEnding 2026-06-21) → delivered to Telegram + persisted; grounded recap (Reels 5/42, cushion 0, wins/drift) + 3 drift questions, good voice. Eyeballed the full-review web page (`/app/cadence/review/2026-06-21`) via agent-browser logged in as Maddie: renders cleanly — persistent nav, cushion trend, pillars w/ platform breakdown (none:1 ig:4) + status flags, consistency (longest streak 2d · 5 zero-drop · 0 bad), Coomander's read, drift questions.
 
 **Finding:** `next_week_focus` renders as a raw JSON array literal — `Next week: ["..."]` — in BOTH the Telegram message and the web page; should be joined to prose. Minor polish bug.
+
+## Session 5b (2026-06-17) — ✅ next_week render bug fixed
+
+`normalizeFocus()` (PR #187, worker e6731e64) coerces next_week_focus (array or JSON-array-literal string) to clean prose, at the build layer + page render. Re-eyeballed the full-review page logged in as Maddie: "Next week:" now renders as a clean sentence (no brackets) — the already-stored 2026-06-21 review displays clean via render-time coercion. +5 unit tests; typecheck + 485 tests + build:cf green.
