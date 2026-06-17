@@ -94,3 +94,9 @@ Scope: everything keys off `todayUTC()` — TodayModel drop attribution, "shippe
 Ported geology's pattern (#183 Phase 1, PR #184, worker 8e844eed): per-user `coomander_settings.timezone` (migration 020 applied to prod; NULL → `America/Chicago`), `todayLocal(tz)`/`toDateLocal(ts,tz)`, and `getTimezone`/`userToday`. "today", drop bucketing, the ramp, and all daily entry points (ping, chat, home, inbound, seed) now use the creator's local day. 472 tests green (incl. new tz boundary + local-bucketing tests).
 
 Data-level proof at 02:26 UTC (= 21:26 CDT): `today` = 2026-06-16 (Chicago) vs 2026-06-17 (UTC); Maddie's afternoon reel counts as today under Chicago, would not under UTC. Maddie defaults to America/Chicago (no config). **Deferred:** weekly-review internal bucketing + Phase 2 (local ping *times*).
+
+## Session 4 (2026-06-17) — ✅ In-app Telegram link flow shipped (#185, the #1 gap)
+
+Ported geology's link-code flow (PR #186, worker 896660cf, migration 021 applied to prod). A creator now connects Telegram with **no DB access**: mint a one-time code → tap a `t.me/coomander_bot?start=<code>` deep link (or send the code) → webhook `consumeLinkCode` binds `user.telegramChatId`. Surfaces: functional onboarding Telegram step + a `TelegramConnect` home banner (shown when unlinked). 8 link-code unit tests; typecheck + 480 tests + build:cf green. Maddie unlinked on prod to re-test the flow clean.
+
+This closes the recurring #1 dogfooding gap — onboarding a creator's comms no longer needs an engineer.
