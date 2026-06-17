@@ -100,3 +100,9 @@ Data-level proof at 02:26 UTC (= 21:26 CDT): `today` = 2026-06-16 (Chicago) vs 2
 Ported geology's link-code flow (PR #186, worker 896660cf, migration 021 applied to prod). A creator now connects Telegram with **no DB access**: mint a one-time code → tap a `t.me/coomander_bot?start=<code>` deep link (or send the code) → webhook `consumeLinkCode` binds `user.telegramChatId`. Surfaces: functional onboarding Telegram step + a `TelegramConnect` home banner (shown when unlinked). 8 link-code unit tests; typecheck + 480 tests + build:cf green. Maddie unlinked on prod to re-test the flow clean.
 
 This closes the recurring #1 dogfooding gap — onboarding a creator's comms no longer needs an engineer.
+
+## Session 5 (2026-06-17) — weekly review + full-review page dogfooded
+
+Fired a manual weekly review for Maddie (weekEnding 2026-06-21) → delivered to Telegram + persisted; grounded recap (Reels 5/42, cushion 0, wins/drift) + 3 drift questions, good voice. Eyeballed the full-review web page (`/app/cadence/review/2026-06-21`) via agent-browser logged in as Maddie: renders cleanly — persistent nav, cushion trend, pillars w/ platform breakdown (none:1 ig:4) + status flags, consistency (longest streak 2d · 5 zero-drop · 0 bad), Coomander's read, drift questions.
+
+**Finding:** `next_week_focus` renders as a raw JSON array literal — `Next week: ["..."]` — in BOTH the Telegram message and the web page; should be joined to prose. Minor polish bug.
