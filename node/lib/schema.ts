@@ -49,6 +49,7 @@ export const accountSnapshots = mod.accountSnapshots;
 export const demographics = mod.demographics;
 export const contentInsights = mod.contentInsights;
 export const coomanderSettings = mod.coomanderSettings;
+export const coomanderLinkCodes = mod.coomanderLinkCodes;
 export const coomanderMessageLog = mod.coomanderMessageLog;
 export const coomanderUsage = mod.coomanderUsage;
 export const coomanderDayState = mod.coomanderDayState;

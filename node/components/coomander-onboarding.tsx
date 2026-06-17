@@ -43,6 +43,7 @@ export function CoomanderOnboarding({ open, onClose, onComplete }: CoomanderOnbo
   const [status, setStatus] = useState<OnboardingStatus | null>(null);
   const [step, setStep] = useState<StepKey>("ops");
   const [busy, setBusy] = useState(false);
+  const [link, setLink] = useState<{ code: string; deepLink: string; botUsername: string } | null>(null);
 
   const loadStatus = useCallback(async () => {
     const res = await fetch("/api/coomander/onboarding");
@@ -94,6 +95,41 @@ export function CoomanderOnboarding({ open, onClose, onComplete }: CoomanderOnbo
       setBusy(false);
     }
   }
+
+  async function connectTelegram() {
+    setBusy(true);
+    try {
+      const res = await fetch("/api/coomander/telegram-link", { method: "POST" });
+      if (!res.ok) throw new Error(`link failed: ${res.status}`);
+      const data = (await res.json()) as { code: string; deepLink: string; botUsername: string };
+      setLink({ code: data.code, deepLink: data.deepLink, botUsername: data.botUsername });
+    } catch (err) {
+      console.error("[Coomander onboarding] telegram-link", err);
+      toast.error("Couldn't start Telegram linking. Try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // While a link code is showing, poll until the chat connects, then advance.
+  useEffect(() => {
+    if (!link || status?.steps.telegram) return;
+    const t = setInterval(async () => {
+      try {
+        const r = await fetch("/api/coomander/telegram-link");
+        if (!r.ok) return;
+        const d = (await r.json()) as { linked: boolean };
+        if (d.linked) {
+          setLink(null);
+          await loadStatus();
+          setStep("telegram");
+          toast.success("Telegram connected 🎉");
+        }
+      } catch { /* keep polling */ }
+    }, 3000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [link, status]);
 
   async function confirmCadence() {
     setBusy(true);
@@ -216,16 +252,49 @@ export function CoomanderOnboarding({ open, onClose, onComplete }: CoomanderOnbo
             {step === "telegram" && (
               <StepBody
                 icon={<Send className="w-5 h-5 text-primary" />}
-                title="Want nudges on Telegram?"
+                title={done?.telegram ? "Telegram connected 🎉" : "Connect Telegram (recommended)."}
                 body={
                   done?.telegram
-                    ? "Telegram is linked — we're already one continuous thread across web and phone. You're all set."
-                    : "I can ping you on Telegram so you stay on track away from your desk — and it's the same thread you see here. You can link it anytime; for now, let's get you to your home."
+                    ? "You're linked — web and Telegram are one continuous thread. I'll nudge you on your phone so you stay on track away from your desk."
+                    : "I keep you on track with quick check-ins on Telegram, and you just tell me what you shipped — same thread you see here. Connect it in two taps."
                 }
               >
-                <Button variant="primary" size="lg" icon={<Check className="w-4 h-4" />} onClick={finish} className="w-full">
-                  {done?.telegram ? "Finish" : "Take me to my home"}
-                </Button>
+                {done?.telegram ? (
+                  <Button variant="primary" size="lg" icon={<Check className="w-4 h-4" />} onClick={finish} className="w-full">
+                    Finish
+                  </Button>
+                ) : link ? (
+                  <div className="flex flex-col gap-2">
+                    <a
+                      href={link.deepLink}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center justify-center gap-2 bg-primary text-white px-4 py-2.5 rounded-lg text-sm font-semibold hover:bg-primary/90 transition-colors"
+                    >
+                      <Send className="w-4 h-4" />
+                      Open @{link.botUsername}
+                    </a>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 text-center">
+                      Or message @{link.botUsername} the code:{" "}
+                      <code className="px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700 font-mono text-gray-900 dark:text-gray-100">{link.code}</code>
+                    </p>
+                    <div className="flex items-center justify-center gap-1.5 text-xs text-gray-400 dark:text-gray-500">
+                      <Loader2 className="w-3 h-3 animate-spin" /> Waiting for you to connect…
+                    </div>
+                    <button onClick={finish} className="text-center text-sm text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400">
+                      I&apos;ll do this later
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-2">
+                    <Button variant="primary" size="lg" loading={busy} icon={<Send className="w-4 h-4" />} onClick={connectTelegram} className="w-full">
+                      Connect Telegram
+                    </Button>
+                    <button onClick={finish} className="text-center text-sm text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400">
+                      Skip for now
+                    </button>
+                  </div>
+                )}
               </StepBody>
             )}
           </div>

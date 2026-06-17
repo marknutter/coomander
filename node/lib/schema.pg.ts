@@ -447,6 +447,14 @@ export const coomanderSettings = pgTable("coomander_settings", {
   updated_at: integer("updated_at").notNull().default(sql`extract(epoch from now())::integer`),
 });
 
+// One-time codes to link a creator's Telegram chat to their account (#185).
+export const coomanderLinkCodes = pgTable("coomander_link_codes", {
+  code: text("code").primaryKey(),
+  user_id: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  expires_at: integer("expires_at").notNull(),
+  created_at: integer("created_at").notNull().default(sql`extract(epoch from now())::integer`),
+});
+
 // RETENTION POLICY: NO TTL, NO deletion sweep, EVER. Long-term companion-memory
 // substrate. Deletion is a manual operator action only, never code.
 export const coomanderMessageLog = pgTable("coomander_message_log", {

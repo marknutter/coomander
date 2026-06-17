@@ -27,6 +27,7 @@ import { Badge } from "@/components/ui/badge";
 import { toast } from "@/lib/use-toast";
 import { commandRegistry } from "@/lib/commands";
 import { CoomanderOnboarding, ONBOARDING_DISMISSED_KEY } from "@/components/coomander-onboarding";
+import { TelegramConnect } from "@/components/telegram-connect";
 
 // ── Types mirroring GET /api/coomander/home ─────────────────────────────────────
 interface HomeBeatLine {
@@ -417,6 +418,7 @@ export default function AppPage() {
 
         {home?.enabled && home.brief ? (
           <>
+            <TelegramConnect />
             <AgentHero brief={home.brief} onAction={seedChat} />
             <RecentThread messages={home.recentMessages} />
             <SecondarySurfaces />

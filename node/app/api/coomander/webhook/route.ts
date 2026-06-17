@@ -20,6 +20,7 @@ import { handleInbound } from "@/lib/coomander/inbound";
 import { claimUpdate } from "@/lib/coomander/telegramDedup";
 import { sendTelegram } from "@/lib/coomander/telegram";
 import { resolveUserByChatId, getCoomanderSettings } from "@/lib/coomander/settings";
+import { consumeLinkCode } from "@/lib/coomander/linkCodes";
 import { appendMessage } from "@/lib/coomander/coomanderMessages";
 import { log } from "@/lib/logger";
 
@@ -52,6 +53,26 @@ export async function POST(request: Request) {
     // Ignore non-text updates (stickers, edits, joins, etc.).
     if (typeof updateId !== "number" || !text || !chatId) {
       return NextResponse.json({ ok: true, ignored: "non-text update" });
+    }
+
+    // Link-code claim FIRST (#185), so even an already-known chat can re-link.
+    // The deep link sends "/start <code>"; a manual send is the bare code.
+    const linkedUser = await consumeLinkCode(text, chatId);
+    if (linkedUser) {
+      await sendTelegram(chatId, "✅ Linked! I'm Coomander — your ops manager. Tell me what you ship and I'll keep your cadence on track.");
+      return NextResponse.json({ ok: true, linked: true });
+    }
+
+    // A /start with no valid code: greet, don't treat it as a domain message.
+    if (text.trim().toLowerCase().startsWith("/start")) {
+      const known = await resolveUserByChatId(chatId);
+      await sendTelegram(
+        chatId,
+        known
+          ? "You're already connected. Just tell me what you shipped and I'll log it."
+          : "Hi! To connect, open Coomander → Settings, tap Connect Telegram, and send me the code it gives you.",
+      );
+      return NextResponse.json({ ok: true, ignored: "start command" });
     }
 
     // Unknown chat -> a one-line hint, nothing persisted.

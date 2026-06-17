@@ -474,6 +474,14 @@ export const coomanderSettings = sqliteTable("coomander_settings", {
   updated_at: integer("updated_at").notNull().default(sql`(unixepoch())`),
 });
 
+// One-time codes to link a creator's Telegram chat to their account (#185).
+export const coomanderLinkCodes = sqliteTable("coomander_link_codes", {
+  code: text("code").primaryKey(),
+  user_id: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  expires_at: integer("expires_at").notNull(),
+  created_at: integer("created_at").notNull().default(sql`(unixepoch())`),
+});
+
 // RETENTION POLICY: NO TTL, NO deletion sweep, EVER. This is the long-term
 // companion-memory substrate — full-companion persona depends on an indefinite
 // log of the creator's conversational history. Any deletion is a manual
