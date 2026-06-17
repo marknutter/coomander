@@ -192,6 +192,25 @@ export type NarrativeGenerator = (det: DeterministicReview, personaMode: Persona
 
 const NARRATIVE_TOOL = "weekly_review_narrative";
 
+/**
+ * Coerce next_week_focus to clean prose. The synthesis model sometimes returns
+ * it as an array, or as a string that is a JSON-array literal (`["..."]`) —
+ * which otherwise renders with literal brackets/quotes in the Telegram message
+ * and the full-review page.
+ */
+export function normalizeFocus(v: unknown): string {
+  if (Array.isArray(v)) return v.filter((x): x is string => typeof x === "string").join(" ").trim();
+  if (typeof v !== "string") return "";
+  const s = v.trim();
+  if (s.startsWith("[") && s.endsWith("]")) {
+    try {
+      const arr = JSON.parse(s);
+      if (Array.isArray(arr)) return arr.filter((x): x is string => typeof x === "string").join(" ").trim();
+    } catch { /* not JSON — fall through to the raw string */ }
+  }
+  return s;
+}
+
 /** Real Anthropic-backed generator. */
 export const anthropicNarrative: NarrativeGenerator = async (det, personaMode, userId) => {
   const client = new Anthropic();
@@ -225,7 +244,7 @@ export const anthropicNarrative: NarrativeGenerator = async (det, personaMode, u
   return {
     highlights: Array.isArray(input.highlights) ? input.highlights.slice(0, 3) : [],
     drift: Array.isArray(input.drift) ? input.drift.slice(0, 3) : [],
-    next_week_focus: typeof input.next_week_focus === "string" ? input.next_week_focus : "",
+    next_week_focus: normalizeFocus(input.next_week_focus),
     drift_questions: Array.isArray(input.drift_questions) ? input.drift_questions.slice(0, 3) : [],
   };
 };

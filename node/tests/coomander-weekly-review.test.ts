@@ -5,6 +5,7 @@ import {
   weekStartFor,
   longestStreakInWeek,
   renderReviewMessage,
+  normalizeFocus,
 } from "@/lib/coomander/weeklyReview";
 import type {
   CadencePillar,
@@ -418,5 +419,26 @@ describe("renderReviewMessage", () => {
     expect(msg).toContain(WEEK_ENDING);
     expect(msg).toContain(appUrl);
     expect(msg).toContain(`${appUrl}/app/cadence/review/${WEEK_ENDING}`);
+  });
+});
+
+describe("normalizeFocus — next_week_focus coercion", () => {
+  it("passes a plain string through", () => {
+    expect(normalizeFocus("Ship one PPV and rebuild a 2-day buffer.")).toBe("Ship one PPV and rebuild a 2-day buffer.");
+  });
+  it("joins a real array", () => {
+    expect(normalizeFocus(["Ship one PPV.", "Bank wall content."])).toBe("Ship one PPV. Bank wall content.");
+  });
+  it("unwraps a JSON-array-literal string (the observed bug)", () => {
+    expect(normalizeFocus('["Cushion is at zero, so get one PPV out."]')).toBe("Cushion is at zero, so get one PPV out.");
+    expect(normalizeFocus('["a","b"]')).toBe("a b");
+  });
+  it("returns empty string for non-string/non-array", () => {
+    expect(normalizeFocus(undefined)).toBe("");
+    expect(normalizeFocus(null)).toBe("");
+    expect(normalizeFocus(42)).toBe("");
+  });
+  it("leaves a non-JSON bracketed string intact", () => {
+    expect(normalizeFocus("[not json] focus on reels")).toBe("[not json] focus on reels");
   });
 });

@@ -10,6 +10,22 @@ import { ArrowLeft } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 
+/** Coerce next_week_focus (which the model sometimes returns as an array or a
+ *  JSON-array-literal string) to clean prose. Client-safe copy of the helper in
+ *  lib/coomander/weeklyReview.ts (that module pulls in server-only deps). */
+function normalizeFocus(v: unknown): string {
+  if (Array.isArray(v)) return v.filter((x): x is string => typeof x === "string").join(" ").trim();
+  if (typeof v !== "string") return "";
+  const s = v.trim();
+  if (s.startsWith("[") && s.endsWith("]")) {
+    try {
+      const arr = JSON.parse(s);
+      if (Array.isArray(arr)) return arr.filter((x): x is string => typeof x === "string").join(" ").trim();
+    } catch { /* not JSON — fall through */ }
+  }
+  return s;
+}
+
 interface Review {
   week_ending: string;
   pillars: Array<{ pillar: { name: string }; expected_total: number; actual_total: number; on_pace: boolean; platform_breakdown: Record<string, number> }>;
@@ -84,11 +100,11 @@ export default function ReviewPage({ params }: { params: Promise<{ date: string 
             </div>
           </Card>
 
-          {(review.highlights.length > 0 || review.drift.length > 0 || review.next_week_focus) && (
+          {(review.highlights.length > 0 || review.drift.length > 0 || normalizeFocus(review.next_week_focus)) && (
             <Card title="Coomander's read">
               {review.highlights.length > 0 && <div className="text-sm mb-2"><strong className="text-green-700">Wins:</strong><ul className="list-disc ml-5">{review.highlights.map((h, i) => <li key={i}>{h}</li>)}</ul></div>}
               {review.drift.length > 0 && <div className="text-sm mb-2"><strong className="text-amber-700">Drift:</strong><ul className="list-disc ml-5">{review.drift.map((d, i) => <li key={i}>{d}</li>)}</ul></div>}
-              {review.next_week_focus && <p className="text-sm"><strong>Next week:</strong> {review.next_week_focus}</p>}
+              {normalizeFocus(review.next_week_focus) && <p className="text-sm"><strong>Next week:</strong> {normalizeFocus(review.next_week_focus)}</p>}
             </Card>
           )}
 
