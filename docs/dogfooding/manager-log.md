@@ -88,3 +88,9 @@ Evening ping said *"Nothing shipped today, zero across the board"* at 8:00 PM CT
 Scope: everything keys off `todayUTC()` — TodayModel drop attribution, "shipped today", `daysSinceStart` (ramp), weekly-review windows. Affects every non-UTC creator (Maddie is US Central).
 
 **Fix (proposed):** add a per-user timezone (default `America/Chicago`); compute "today"/day-boundaries/week-start in the creator's local tz instead of UTC. That fixes the day attribution + "nothing shipped today" + makes the 8 PM CT evening ping see the correct local day. **Separate/larger:** firing the cron pings at the creator's *local* times (currently fixed UTC, drifts with DST) — the direction doc's "per-user local scheduling" TODO; defer.
+
+## Session 3b (2026-06-17) — ✅ Phase 1 (timezone day boundary) shipped
+
+Ported geology's pattern (#183 Phase 1, PR #184, worker 8e844eed): per-user `coomander_settings.timezone` (migration 020 applied to prod; NULL → `America/Chicago`), `todayLocal(tz)`/`toDateLocal(ts,tz)`, and `getTimezone`/`userToday`. "today", drop bucketing, the ramp, and all daily entry points (ping, chat, home, inbound, seed) now use the creator's local day. 472 tests green (incl. new tz boundary + local-bucketing tests).
+
+Data-level proof at 02:26 UTC (= 21:26 CDT): `today` = 2026-06-16 (Chicago) vs 2026-06-17 (UTC); Maddie's afternoon reel counts as today under Chicago, would not under UTC. Maddie defaults to America/Chicago (no config). **Deferred:** weekly-review internal bucketing + Phase 2 (local ping *times*).
