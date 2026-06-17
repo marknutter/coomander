@@ -16,7 +16,8 @@ import { buildTodayModel } from "@/lib/coomander/todayModel";
 import { listBeats } from "@/lib/coomander/beats";
 import { listProcurement } from "@/lib/coomander/procurement";
 import { listDrops } from "@/lib/coomander/drops";
-import { getDayState, todayUTC } from "@/lib/coomander/scheduling";
+import { getDayState } from "@/lib/coomander/scheduling";
+import { userToday } from "@/lib/coomander/settings";
 import type {
   CadencePillar,
   CadenceBeat,
@@ -96,7 +97,7 @@ describe("handleChatTurn — tool-use turn writes domain rows", () => {
     expect(res.acted).toBe(true);
     expect(res.reply.length).toBeGreaterThan(0);
 
-    const day = await getDayState(userId, todayUTC());
+    const day = await getDayState(userId, await userToday(userId));
     expect(day?.day_quality).toBe("bad");
   });
 

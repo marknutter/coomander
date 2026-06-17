@@ -20,15 +20,17 @@ import { sendTelegram } from "./telegram";
 import { coomanderSystem, slotPrompt, type Slot } from "./agentPrompts";
 import {
   getCoomanderSettings,
+  getTimezone,
+  userToday,
   type NagFrequency,
   type PersonaMode,
 } from "./settings";
-import { getDayState, markSlotSent, todayUTC } from "./scheduling";
+import { getDayState, markSlotSent } from "./scheduling";
 import { appendMessage } from "./coomanderMessages";
 import { logCoomanderUsage } from "./usage";
 import { getTodayModel, type TodayModel } from "./todayModel";
 import { expectedToday } from "./ramp";
-import { daysBetween } from "./consistency";
+import { daysBetween, toDateLocal } from "./consistency";
 import { getDb } from "@/lib/db";
 import { user as userT, coomanderSettings as settingsT } from "@/lib/schema";
 import { eq } from "drizzle-orm";
@@ -100,7 +102,9 @@ export async function daysSinceStart(userId: string, today: string): Promise<num
   const rows = (await db.select({ seeded: settingsT.ops_seeded_at }).from(settingsT).where(eq(settingsT.user_id, userId)).limit(1)) as Array<{ seeded: number | null }>;
   const seeded = rows[0]?.seeded;
   if (!seeded) return Number.MAX_SAFE_INTEGER; // not in ramp
-  const seededDate = new Date(seeded * 1000).toISOString().slice(0, 10);
+  // Seed date in the creator's local tz so the ramp counter aligns with their
+  // local "today" (#183).
+  const seededDate = toDateLocal(seeded, await getTimezone(userId));
   return Math.max(0, daysBetween(seededDate, today));
 }
 
@@ -159,7 +163,7 @@ export async function runAgentPing(userId: string, slot: Slot): Promise<AgentRun
     if (!chatId) return { ok: true, slot, sent: false, skipped: "no telegram chat id" };
 
     const settings = await getCoomanderSettings(userId);
-    const date = todayUTC();
+    const date = await userToday(userId);
     const day = await getDayState(userId, date);
     const plan = planPing({ slot, nagFrequency: settings.nagFrequency, dayQuality: day?.day_quality ?? null });
     if (!plan.send) return { ok: true, slot, sent: false, skipped: plan.reason };

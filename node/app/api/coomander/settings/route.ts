@@ -21,6 +21,16 @@ import { log } from "@/lib/logger";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+/** True if `tz` is a valid IANA timezone (Intl throws on unknown zones). */
+function isValidTimezone(tz: string): boolean {
+  try {
+    Intl.DateTimeFormat("en-US", { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function GET(request: Request) {
   try {
     const session = await auth.api.getSession({ headers: request.headers });
@@ -58,6 +68,12 @@ export async function PATCH(request: Request) {
         throw new BadRequestError("pingTimesJson must be a string or null");
       }
       patch.pingTimesJson = body.pingTimesJson as string | null;
+    }
+    if (body.timezone !== undefined) {
+      if (typeof body.timezone !== "string" || !isValidTimezone(body.timezone)) {
+        throw new BadRequestError("timezone must be a valid IANA timezone, e.g. America/Chicago");
+      }
+      patch.timezone = body.timezone;
     }
     // Stamps defaults_banner_dismissed_at — used by onboarding (#173) as the
     // "creator confirmed their starter cadence defaults" signal.

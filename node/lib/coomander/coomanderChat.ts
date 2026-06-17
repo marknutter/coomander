@@ -14,12 +14,11 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import { listMessages, appendMessage, type CoomanderMessage } from "./coomanderMessages";
-import { getCoomanderSettings } from "./settings";
+import { getCoomanderSettings, userToday } from "./settings";
 import { coomanderSystem } from "./agentPrompts";
 import { getTodayModel } from "./todayModel";
 import { renderContext, daysSinceStart } from "./agent";
 import { tools, resolveToolUse, executeAction, loadContext } from "./inbound";
-import { todayUTC } from "./scheduling";
 import { logCoomanderUsage } from "./usage";
 
 const MODEL = process.env.COOMANDER_AGENT_MODEL || process.env.CHAT_MODEL || "claude-sonnet-4-6";
@@ -99,7 +98,7 @@ export async function handleChatTurn(
   opts: HandleChatTurnOptions = {},
 ): Promise<ChatTurnResult> {
   const settings = await getCoomanderSettings(userId);
-  const date = todayUTC();
+  const date = await userToday(userId);
 
   // Build grounding context: live ops state + recent conversation. We inject the
   // thread into the system prompt (rather than as message turns) to avoid

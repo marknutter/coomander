@@ -1,125 +1,125 @@
 {
-  "configPath": "/Users/marknutter/Code/coomander/node/openapi-gen.config.json",
-  "outputFile": "/Users/marknutter/Code/coomander/node/public/openapi.json",
+  "configPath": "/Users/marknutter/Code/maddiehq/node/openapi-gen.config.json",
+  "outputFile": "/Users/marknutter/Code/maddiehq/node/public/openapi.json",
   "diagnostics": [
     {
       "code": "response-inference-unresolved",
       "severity": "warning",
       "message": "Could not fully infer a response schema from a return statement. Add an explicit @response tag to make the output deterministic.",
-      "filePath": "/Users/marknutter/Code/coomander/node/app/api/analyze/instagram/stream/route.ts",
+      "filePath": "/Users/marknutter/Code/maddiehq/node/app/api/analyze/instagram/stream/route.ts",
       "routePath": "/analyze/instagram/stream"
     },
     {
       "code": "response-inference-unresolved",
       "severity": "warning",
       "message": "Could not fully infer a response schema from a return statement. Add an explicit @response tag to make the output deterministic.",
-      "filePath": "/Users/marknutter/Code/coomander/node/app/api/analyze/instagram/stream/route.ts",
+      "filePath": "/Users/marknutter/Code/maddiehq/node/app/api/analyze/instagram/stream/route.ts",
       "routePath": "/analyze/instagram/stream"
     },
     {
       "code": "response-inference-unresolved",
       "severity": "warning",
       "message": "Could not fully infer a response schema from a return statement. Add an explicit @response tag to make the output deterministic.",
-      "filePath": "/Users/marknutter/Code/coomander/node/app/api/coomander/beats/route.ts",
+      "filePath": "/Users/marknutter/Code/maddiehq/node/app/api/coomander/beats/route.ts",
       "routePath": "/coomander/beats"
     },
     {
       "code": "response-inference-unresolved",
       "severity": "warning",
       "message": "Could not fully infer a response schema from a return statement. Add an explicit @response tag to make the output deterministic.",
-      "filePath": "/Users/marknutter/Code/coomander/node/app/api/coomander/content/route.ts",
+      "filePath": "/Users/marknutter/Code/maddiehq/node/app/api/coomander/content/route.ts",
       "routePath": "/coomander/content"
     },
     {
       "code": "response-inference-unresolved",
       "severity": "warning",
       "message": "Could not fully infer a response schema from a return statement. Add an explicit @response tag to make the output deterministic.",
-      "filePath": "/Users/marknutter/Code/coomander/node/app/api/coomander/drops/route.ts",
+      "filePath": "/Users/marknutter/Code/maddiehq/node/app/api/coomander/drops/route.ts",
       "routePath": "/coomander/drops"
     },
     {
       "code": "response-inference-unresolved",
       "severity": "warning",
       "message": "Could not fully infer a response schema from a return statement. Add an explicit @response tag to make the output deterministic.",
-      "filePath": "/Users/marknutter/Code/coomander/node/app/api/coomander/pillars/route.ts",
+      "filePath": "/Users/marknutter/Code/maddiehq/node/app/api/coomander/pillars/route.ts",
       "routePath": "/coomander/pillars"
     },
     {
       "code": "response-inference-unresolved",
       "severity": "warning",
       "message": "Could not fully infer a response schema from a return statement. Add an explicit @response tag to make the output deterministic.",
-      "filePath": "/Users/marknutter/Code/coomander/node/app/api/coomander/procurement/route.ts",
+      "filePath": "/Users/marknutter/Code/maddiehq/node/app/api/coomander/procurement/route.ts",
       "routePath": "/coomander/procurement"
     },
     {
       "code": "response-inference-unresolved",
       "severity": "warning",
       "message": "Could not fully infer a response schema from a return statement. Add an explicit @response tag to make the output deterministic.",
-      "filePath": "/Users/marknutter/Code/coomander/node/app/api/platforms/instagram/sync/stream/route.ts",
+      "filePath": "/Users/marknutter/Code/maddiehq/node/app/api/platforms/instagram/sync/stream/route.ts",
       "routePath": "/platforms/instagram/sync/stream"
     },
     {
       "code": "response-inference-unresolved",
       "severity": "warning",
       "message": "Could not fully infer a response schema from a return statement. Add an explicit @response tag to make the output deterministic.",
-      "filePath": "/Users/marknutter/Code/coomander/node/app/api/platforms/instagram/sync/stream/route.ts",
+      "filePath": "/Users/marknutter/Code/maddiehq/node/app/api/platforms/instagram/sync/stream/route.ts",
       "routePath": "/platforms/instagram/sync/stream"
     },
     {
       "code": "response-inference-unresolved",
       "severity": "warning",
       "message": "Could not fully infer a response schema from a return statement. Add an explicit @response tag to make the output deterministic.",
-      "filePath": "/Users/marknutter/Code/coomander/node/app/api/waitlist/join/route.ts",
+      "filePath": "/Users/marknutter/Code/maddiehq/node/app/api/waitlist/join/route.ts",
       "routePath": "/waitlist/join"
     },
     {
       "code": "response-inference-unresolved",
       "severity": "warning",
       "message": "Could not fully infer a response schema from a return statement. Add an explicit @response tag to make the output deterministic.",
-      "filePath": "/Users/marknutter/Code/coomander/node/app/api/waitlist/join/route.ts",
+      "filePath": "/Users/marknutter/Code/maddiehq/node/app/api/waitlist/join/route.ts",
       "routePath": "/waitlist/join"
     },
     {
       "code": "response-inference-unresolved",
       "severity": "warning",
       "message": "Could not fully infer a response schema from a return statement. Add an explicit @response tag to make the output deterministic.",
-      "filePath": "/Users/marknutter/Code/coomander/node/app/api/waitlist/join/route.ts",
+      "filePath": "/Users/marknutter/Code/maddiehq/node/app/api/waitlist/join/route.ts",
       "routePath": "/waitlist/join"
     },
     {
       "code": "response-inference-unresolved",
       "severity": "warning",
       "message": "Could not fully infer a response schema from a return statement. Add an explicit @response tag to make the output deterministic.",
-      "filePath": "/Users/marknutter/Code/coomander/node/app/api/wiki-search/route.ts",
+      "filePath": "/Users/marknutter/Code/maddiehq/node/app/api/wiki-search/route.ts",
       "routePath": "/wiki-search"
     }
   ],
   "performance": {
-    "prepareTemplateMs": 0.10545799999999872,
-    "loadCustomFragmentsMs": 0.00037500000001955414,
-    "prepareDocumentMs": 0.10583300000001827,
-    "scanRouteFilesMs": 3.701833000000022,
-    "deriveRoutePathMs": 0.28478400000005877,
-    "filterRouteCandidatesMs": 0.23504800000142723,
-    "sourcePrecheckMs": 6.362667000001295,
-    "readRouteFilesMs": 5.951795000002733,
-    "parseRouteFilesMs": 33.04824899999829,
-    "analyzeRouteFilesMs": 28.518205999999964,
-    "typescriptResponseInferenceMs": 6813.3222510000005,
-    "processRouteFilesMs": 6875.241834,
-    "registerRouteMs": 2.424121000004277,
+    "prepareTemplateMs": 0.10329200000001038,
+    "loadCustomFragmentsMs": 0.00033400000006622577,
+    "prepareDocumentMs": 0.1036260000000766,
+    "scanRouteFilesMs": 1.7854169999999385,
+    "deriveRoutePathMs": 0.2786280000016177,
+    "filterRouteCandidatesMs": 0.27170799999964856,
+    "sourcePrecheckMs": 2.5671660000009524,
+    "readRouteFilesMs": 2.1087929999974904,
+    "parseRouteFilesMs": 30.511794000001828,
+    "analyzeRouteFilesMs": 24.60141399999793,
+    "typescriptResponseInferenceMs": 4618.738207,
+    "processRouteFilesMs": 4674.235707000003,
+    "registerRouteMs": 3.0269610000010516,
     "getSchemaContentMs": 0,
     "createRequestParamsMs": 0,
     "createRequestBodyMs": 0,
-    "processResponsesMs": 0.9287929999975404,
+    "processResponsesMs": 1.0251249999963647,
     "createResponseSchemaMs": 0,
-    "buildOperationsMs": 2.515664999998421,
-    "sortAndMergePathsMs": 1.4491669999997612,
-    "buildPathsMs": 1.4491669999997612,
-    "defaultComponentsAndErrorsMs": 0.15883400000075198,
-    "mergeSchemasMs": 0.05333299999983865,
-    "finalizeDocumentMs": 8.13274999999976,
-    "totalMs": 6898.649375,
-    "scanRoutesMs": 6881.4593319999985
+    "buildOperationsMs": 3.107790000001728,
+    "sortAndMergePathsMs": 1.0539580000004207,
+    "buildPathsMs": 1.0539580000004207,
+    "defaultComponentsAndErrorsMs": 0.1319999999996071,
+    "mergeSchemasMs": 0.04604199999994307,
+    "finalizeDocumentMs": 5.79858300000069,
+    "totalMs": 4689.780375,
+    "scanRoutesMs": 4679.128914000004
   }
 }

@@ -14,6 +14,7 @@
 import crypto from "crypto";
 import { and, eq, isNotNull } from "drizzle-orm";
 import { getDb } from "@/lib/db";
+import { DEFAULT_TIMEZONE, todayLocal } from "./consistency";
 import { user as userT, coomanderSettings as settingsT } from "@/lib/schema";
 
 export type NagFrequency = "tight" | "moderate" | "light";
@@ -29,6 +30,8 @@ export interface CoomanderSettingsResolved {
   userId: string;
   nagFrequency: NagFrequency;
   personaMode: PersonaMode;
+  /** IANA timezone for the creator's local day boundary (#183). */
+  timezone: string;
   pingTimesJson: string | null;
   companionConsentAt: number | null;
   opsSeededAt: number | null;
@@ -41,12 +44,18 @@ type SettingsRow =
   | {
       nag_frequency?: string | null;
       persona_mode?: string | null;
+      timezone?: string | null;
       ping_times_json?: string | null;
       companion_consent_at?: number | null;
       ops_seeded_at?: number | null;
       defaults_banner_dismissed_at?: number | null;
     }
   | undefined;
+
+export function pickTimezone(row: SettingsRow): string {
+  const v = (row?.timezone ?? "").trim();
+  return v.length > 0 ? v : DEFAULT_TIMEZONE;
+}
 
 export function pickNagFrequency(row: SettingsRow): NagFrequency {
   const v = (row?.nag_frequency ?? "").trim() as NagFrequency;
@@ -81,11 +90,22 @@ export async function getCoomanderSettings(userId: string): Promise<CoomanderSet
     userId,
     nagFrequency: pickNagFrequency(row),
     personaMode: pickPersonaMode(row),
+    timezone: pickTimezone(row),
     pingTimesJson: row?.ping_times_json ?? null,
     companionConsentAt: row?.companion_consent_at ?? null,
     opsSeededAt: row?.ops_seeded_at ?? null,
     defaultsBannerDismissedAt: row?.defaults_banner_dismissed_at ?? null,
   };
+}
+
+/** A user's resolved IANA timezone (falls back to DEFAULT_TIMEZONE). */
+export async function getTimezone(userId: string): Promise<string> {
+  return pickTimezone(await settingsRow(userId));
+}
+
+/** The creator's "today" (YYYY-MM-DD) in their local timezone (#183). */
+export async function userToday(userId: string): Promise<string> {
+  return todayLocal(await getTimezone(userId));
 }
 
 /** Each user the scheduled ping fans out to: opted-in AND with a Telegram chat. */
@@ -117,6 +137,7 @@ export async function resolveUserByChatId(chatId: string): Promise<string | null
 export interface SettingsPatch {
   nagFrequency?: NagFrequency;
   personaMode?: PersonaMode;
+  timezone?: string;
   pingTimesJson?: string | null;
   /** When true, stamp defaults_banner_dismissed_at = now. */
   dismissBanner?: boolean;
@@ -135,6 +156,7 @@ export async function updateCoomanderSettings(
     const set: Record<string, unknown> = { updated_at: now };
     if (patch.nagFrequency !== undefined) set.nag_frequency = patch.nagFrequency;
     if (patch.personaMode !== undefined) set.persona_mode = patch.personaMode;
+    if (patch.timezone !== undefined) set.timezone = patch.timezone;
     if (patch.pingTimesJson !== undefined) set.ping_times_json = patch.pingTimesJson;
     if (patch.dismissBanner) set.defaults_banner_dismissed_at = now;
     await db.update(settingsT).set(set).where(eq(settingsT.user_id, userId));
@@ -143,6 +165,7 @@ export async function updateCoomanderSettings(
       user_id: userId,
       nag_frequency: patch.nagFrequency ?? DEFAULT_NAG_FREQUENCY,
       persona_mode: patch.personaMode ?? DEFAULT_PERSONA_MODE,
+      timezone: patch.timezone ?? null,
       ping_times_json: patch.pingTimesJson ?? null,
       defaults_banner_dismissed_at: patch.dismissBanner ? now : null,
       created_at: now,
