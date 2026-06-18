@@ -1,0 +1,272 @@
+---
+title: Deployment
+description: Deploy your Coomander application to Docker or Railway.
+---
+
+## Quick start
+
+**Local Docker:**
+```bash
+docker-compose up -d --build <app-name>
+```
+
+**Railway Cloud:**
+```bash
+railway login && railway link && railway up
+```
+
+## Local Docker deployment (Mac Mini + Caddy)
+
+### Architecture
+
+- **Docker** -- containerized app isolation
+- **Caddy** -- reverse proxy routing subdomains
+- **Cloudflare Tunnel** -- secure HTTPS without port forwarding
+
+### Prerequisites
+
+1. Docker + Docker Compose installed
+2. Caddy configured as reverse proxy (port 8080)
+3. Cloudflare Tunnel routing to `localhost:8080`
+4. Domain with wildcard DNS
+
+### Steps
+
+#### 1. Choose a port
+
+Pick an unused port. Check existing ports:
+
+```bash
+grep -r "ports:" docker-compose.yml
+```
+
+#### 2. Update Dockerfile
+
+```dockerfile
+EXPOSE 3XXX
+ENV PORT=3XXX
+CMD ["node_modules/.bin/next", "start", "-p", "3XXX"]
+```
+
+#### 3. Add to docker-compose.yml
+
+```yaml
+services:
+  your-app-name:
+    build:
+      context: ./your-app-name
+      dockerfile: Dockerfile
+    container_name: your-app-name
+    restart: unless-stopped
+    ports:
+      - "3XXX:3XXX"
+    volumes:
+      - ./your-app-name/data:/data
+    environment:
+      DATABASE_PATH: /data/coomander.db
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET}
+      BETTER_AUTH_URL: https://yourapp.example.com
+      APP_URL: https://yourapp.example.com
+      APP_NAME: MyApp
+```
+
+#### 4. Update Caddyfile
+
+```
+yourapp.example.com {
+    reverse_proxy localhost:3XXX
+}
+```
+
+Reload: `caddy reload --config ~/.config/caddy/Caddyfile`
+
+#### 5. Update OAuth redirect URIs
+
+Add to Google Console + GitHub OAuth App:
+
+```
+https://yourapp.example.com/api/auth/callback/google
+https://yourapp.example.com/api/auth/callback/github
+```
+
+#### 6. Build and deploy
+
+```bash
+docker-compose up -d --build your-app-name
+docker logs -f your-app-name
+```
+
+## Railway cloud deployment
+
+### Why Railway?
+
+- Auto-deploy from git push
+- Persistent volumes for SQLite
+- HTTPS + custom domains included
+- Free tier: 500 hours/month, 500MB disk
+
+### Steps
+
+#### 1. Initialize
+
+```bash
+railway login
+cd your-app-folder
+railway init
+```
+
+#### 2. Link GitHub repo
+
+In Railway dashboard: Settings > Connect GitHub repo > Choose your repo > Set branch: `main`
+
+#### 3. Add persistent volume
+
+In Railway dashboard: Go to your service > Variables > Add Volume > Mount path: `/data`
+
+**Critical:** Volume must exist BEFORE setting `DATABASE_PATH=/data/coomander.db`
+
+#### 4. Set environment variables
+
+```bash
+railway variables set BETTER_AUTH_SECRET="$(openssl rand -base64 32)"
+railway variables set BETTER_AUTH_URL="https://yourapp.up.railway.app"
+railway variables set APP_URL="https://yourapp.up.railway.app"
+railway variables set APP_NAME="MyApp"
+railway variables set DATABASE_PATH="/data/coomander.db"
+```
+
+#### 5. Deploy
+
+Railway auto-deploys on git push:
+
+```bash
+git push origin main
+```
+
+Or manually: `railway up`
+
+## Database backups (Litestream)
+
+Litestream continuously streams SQLite WAL changes to S3-compatible storage.
+
+### Setup
+
+1. Create an S3 bucket (AWS S3, Cloudflare R2, or any S3-compatible provider)
+2. Set environment variables:
+
+```bash
+LITESTREAM_ACCESS_KEY_ID=your-access-key
+LITESTREAM_SECRET_ACCESS_KEY=your-secret-key
+LITESTREAM_REPLICA_BUCKET=my-app-backups
+LITESTREAM_REPLICA_PATH=db
+LITESTREAM_REPLICA_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com
+LITESTREAM_REPLICA_REGION=us-east-1
+```
+
+3. Start the production stack:
+
+```bash
+docker-compose up -d prod litestream
+```
+
+### Restore from backup
+
+```bash
+bash scripts/litestream-restore.sh ./data/restored.db
+```
+
+## Environment variables reference
+
+### Required
+
+| Variable | Description |
+|----------|-------------|
+| `BETTER_AUTH_SECRET` | Auth session signing key (run `openssl rand -base64 32`) |
+| `BETTER_AUTH_URL` | Your app's public URL |
+| `DATABASE_PATH` | SQLite database file path |
+| `APP_URL` | Your app's public URL |
+| `APP_NAME` | Display name in emails and MFA |
+
+### Optional
+
+| Variable | Description |
+|----------|-------------|
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google OAuth |
+| `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | GitHub OAuth |
+| `EMAIL_FROM` | Sender address (e.g. `Coomander <noreply@yourdomain.com>`) |
+| `CLOUDFLARE_ACCOUNT_ID` | For the email REST fallback (off-Workers / dev) |
+| `CF_EMAIL_API_TOKEN` | CF token with "Email Sending" perms (REST fallback) |
+| `EMAIL_TRACKING_SECRET` | HMAC key for open/click tracking (falls back to `BETTER_AUTH_SECRET`) |
+| `STRIPE_SECRET_KEY` | Stripe API key |
+| `STRIPE_PRICE_ID` | Stripe subscription price ID |
+| `STRIPE_WEBHOOK_SECRET` | Stripe webhook signing secret |
+
+## Email (Cloudflare Email Service)
+
+Transactional + campaign email is sent via **Cloudflare Email Service** (migrated
+off Resend). `lib/email.ts` uses a three-tier transport: the `[[send_email]]`
+Workers binding (`name = "EMAIL"` in `wrangler.toml`) in production, the REST API
+(`CLOUDFLARE_ACCOUNT_ID` + `CF_EMAIL_API_TOKEN`) off-Workers, and a console
+fallback in dev (auth links are printed so flows work with no provider).
+
+**Operator setup (once):**
+
+1. Dashboard → **Email → Email Sending** → **Onboard a domain**; add the
+   generated **SPF / DKIM / DMARC / MX** DNS records and wait for verification.
+2. While the domain is in **sandbox**, Cloudflare only delivers to **verified
+   destination addresses** — add your test recipients under Email Sending, or
+   you'll see "sent" with nothing arriving. Request production access to lift it.
+3. Set `EMAIL_FROM` to an address on the onboarded domain (`wrangler.toml [vars]`).
+4. For the REST fallback only: create an API token with **Email Sending**
+   permission and `wrangler secret put CF_EMAIL_API_TOKEN` (+ set
+   `CLOUDFLARE_ACCOUNT_ID`). On Workers the `send_email` binding needs neither.
+
+## Health check endpoint
+
+```
+GET /api/health
+```
+
+Returns `200` when healthy, `503` when degraded:
+
+```json
+{
+  "ok": true,
+  "db": true,
+  "auth": true,
+  "timestamp": "2026-03-19T12:00:00.000Z"
+}
+```
+
+## Deployment checklist
+
+- [ ] Environment variables set (BETTER_AUTH_SECRET, BETTER_AUTH_URL, APP_URL)
+- [ ] Database volume configured
+- [ ] OAuth redirect URIs updated
+- [ ] Stripe webhooks configured (if using payments)
+- [ ] Test signup/login flows
+- [ ] Test database persistence (restart container, data survives)
+- [ ] SSL certificate working (HTTPS)
+- [ ] Litestream configured for backups (optional but recommended)
+
+## Troubleshooting
+
+### "Environment validation failed"
+
+One or more required env vars are missing. The error output tells you exactly which.
+
+### Health check returns `auth: false`
+
+Better Auth migrations didn't run. Trigger manually:
+
+```bash
+docker exec coomander-node npx @better-auth/cli@latest migrate --config lib/auth.ts
+```
+
+### "Address already in use"
+
+Port conflict. Check what's using the port: `docker ps`
+
+### "SQLITE_CANTOPEN"
+
+Ensure the volume exists at `/data` and `DATABASE_PATH=/data/coomander.db` is set.

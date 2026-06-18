@@ -1,0 +1,28 @@
+# Build context is the repo ROOT (set in docker-compose.yml) so the hoisted
+# workspace lockfile at the root is visible to `npm ci`.
+# Debian-based (NOT alpine): workerd is a glibc binary and fails to load
+# under musl ("fcntl64: symbol not found") even with libc6-compat.
+FROM node:22-slim
+
+# workerd reads the SYSTEM trust store for outbound TLS (the chat loop calls
+# api.anthropic.com). node:22-slim ships WITHOUT ca-certificates, so workerd
+# trusts no roots and every HTTPS call fails with "TLS peer's certificate is
+# not trusted / unable to get local issuer certificate". (Node itself works —
+# it bundles its own CA set — which is why this is easy to misdiagnose.)
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Workspace manifests: root lockfile + root package.json + the agents
+# workspace's package.json. `npm ci` installs into /app/node_modules,
+# including the linux workerd binary wrangler dev needs.
+COPY package.json package-lock.json ./
+COPY apps/agents/package.json ./apps/agents/package.json
+RUN npm ci
+
+WORKDIR /app/apps/agents
+# wrangler dev port — reached by the Caddy sidecar over the shared netns
+EXPOSE 8788
+CMD ["npm", "run", "dev"]

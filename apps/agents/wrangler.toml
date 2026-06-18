@@ -1,0 +1,78 @@
+# Coomander sidecar agent Worker (Coomander).
+#
+# Runs as its own small Worker (NOT inside the OpenNext app) so daily dev can
+# use `wrangler dev`'s workerd runtime — Durable Objects, alarms, and
+# WebSockets all work locally via miniflare while the Next.js dev loop stays
+# untouched. Ported from the AppSeed agents epic (template #388) for #192.
+
+name = "coomander-agents"
+main = "src/index.ts"
+compatibility_date = "2026-05-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+# Where to validate Better Auth sessions in dev: next dev on the shared
+# container netns. Prod uses the WEB service binding instead.
+WEB_ORIGIN = "http://127.0.0.1:3000"
+
+# Secrets (NOT declared here): ANTHROPIC_API_KEY (chat) and
+# AGENTS_INTERNAL_SECRET (server-to-server calls for scheduled wakes) come from
+# .dev.vars / apps/web/.env.local in dev and `wrangler secret put <NAME>` in
+# prod. See .dev.vars.example.
+
+# Each Agent class is a Durable Object: one binding + one SQLite-backed
+# migration entry per class. Never edit an existing migration tag — add a new
+# one when introducing another agent class.
+[[durable_objects.bindings]]
+name = "AppAgent"
+class_name = "AppAgent"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["AppAgent"]
+
+# ── Production (`wrangler deploy --env production`) ───────────────────────────
+# Daily dev uses the top-level env above (`wrangler dev` — no route, no service
+# binding, WEB_ORIGIN → next dev). Production is its own env because a few things
+# differ, and wrangler named envs do NOT inherit bindings/vars/migrations from
+# the top level — so the DO binding + migration are redeclared below.
+#
+# DEPLOY IS OPERATOR-GATED (#192): the production route below is COMMENTED so
+# even an accidental `wrangler deploy --env production` takes no traffic.
+# To go live: uncomment the route, set the two secrets
+# (`wrangler secret put ANTHROPIC_API_KEY --env production`,
+#  `wrangler secret put AGENTS_INTERNAL_SECRET --env production` — the latter
+# must match the app worker's value), then `npm run deploy:agents`.
+[env.production]
+name = "coomander-agents"
+
+# Same Cloudflare zone as the OpenNext app worker so the Better Auth session
+# cookie flows. This `/agents/*` pattern route is more specific than the app
+# worker's custom-domain route on the same host, so Cloudflare routes
+# `/agents/*` here and everything else to the app worker (`coomander`).
+# Uncomment to go live:
+# routes = [
+#   { pattern = "coomander.com/agents/*", zone_name = "coomander.com" },
+# ]
+
+[env.production.vars]
+# In prod the agent reaches the app worker over the WEB service binding below
+# (internal — no public hop). WEB_ORIGIN still supplies the request URL so the
+# Host/origin is correct for Better Auth; point it at the app's public origin.
+WEB_ORIGIN = "https://coomander.com"
+
+# Service binding agents → app worker. Session validation + persistence + the
+# internal-secret routes go through this, never a public HTTP round-trip.
+# `service` is the app worker's `name` from apps/web/wrangler.toml.
+[[env.production.services]]
+binding = "WEB"
+service = "coomander"
+
+# NOT inherited from the top-level env — redeclare for production.
+[[env.production.durable_objects.bindings]]
+name = "AppAgent"
+class_name = "AppAgent"
+
+[[env.production.migrations]]
+tag = "v1"
+new_sqlite_classes = ["AppAgent"]

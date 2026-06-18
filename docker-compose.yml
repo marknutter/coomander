@@ -39,28 +39,74 @@ services:
   # container serves both. Full dev mode (hot reload, HMR) on both paths.
   app-dev:
     build:
-      context: ./node
-      dockerfile: Dockerfile.dev
+      context: .
+      dockerfile: apps/web/Dockerfile.dev
     container_name: coomander-dev
     network_mode: service:caddy-dev
     depends_on:
       - caddy-dev
     volumes:
-      - ./node:/app
-      # Named volume so npm-installed deps survive `docker compose down/up`.
+      - ./apps/web:/app/apps/web
+      - ./packages/core:/app/packages/core
+      # tsconfig.base.json is extended by apps/web/tsconfig.json; Turbopack 500s without it.
+      - ./tsconfig.base.json:/app/tsconfig.base.json:ro
+      # Named volumes so npm-installed deps survive `docker compose down/up`.
       # Populated from the image on first create. To refresh after a
       # package.json change: `docker compose run --rm app-dev npm install`.
-      - node_modules:/app/node_modules
-      - ./node/data:/app/data
-    env_file: ./node/.env.local
+      - root_node_modules:/app/node_modules
+      - web_node_modules:/app/apps/web/node_modules
+      - ./apps/web/data:/app/apps/web/data
+    env_file: ./apps/web/.env.local
     environment:
       NODE_ENV: development
-      DATABASE_PATH: /app/data/coomander.db
+      DATABASE_PATH: /app/apps/web/data/coomander.db
       BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:3005}
       APP_URL: ${APP_URL:-http://localhost:3005}
       WATCHPACK_POLLING: "true"
     restart: unless-stopped
 
+  # ── Agents Worker (Cloudflare Agents SDK sidecar, #192) ──────────────────
+  # Runs `wrangler dev` (workerd/miniflare) so the AppAgent Durable Object,
+  # alarms, and the streaming WebSocket chat all work locally. Shares
+  # caddy-dev's network namespace; Caddy routes /agents/* → here (port 8788)
+  # while everything else goes to next dev (port 3000). The agent reads/writes
+  # only through the apps/web API — it has NO D1 binding.
+  agents-dev:
+    build:
+      # Context is the repo root so the hoisted workspace lockfile is visible.
+      context: .
+      dockerfile: apps/agents/Dockerfile.dev
+    container_name: coomander-agents
+    network_mode: service:caddy-dev
+    depends_on:
+      - caddy-dev
+    # wrangler dev assumes an interactive terminal for its hotkey UI and
+    # crashes with `write EPIPE` without one.
+    tty: true
+    stdin_open: true
+    volumes:
+      - ./apps/agents:/app/apps/agents
+      # scripts/dev.sh builds wrangler's --env-file list from whichever of
+      # ../web/.env(.local) and .dev.vars exist — the web env file carries
+      # ANTHROPIC_API_KEY (same key the POST chat path uses); .dev.vars carries
+      # AGENTS_INTERNAL_SECRET.
+      - ./apps/web/.env.local:/app/apps/web/.env.local:ro
+      # Two named volumes, mirroring the web service:
+      #  - root holds any hoisted deps;
+      #  - LOCAL holds apps/agents/node_modules where npm installs wrangler +
+      #    agents (not hoisted). Without it the ./apps/agents bind mount shadows
+      #    the image's workspace-local node_modules and wrangler never binds 8788.
+      # Refresh after a package.json change:
+      # `docker compose run --rm agents-dev npm ci`.
+      - agents_node_modules:/app/node_modules
+      - agents_local_node_modules:/app/apps/agents/node_modules
+    environment:
+      NODE_ENV: development
+    restart: unless-stopped
+
 volumes:
-  node_modules:
+  root_node_modules:
+  web_node_modules:
+  agents_node_modules:
+  agents_local_node_modules:
   caddy_state:
