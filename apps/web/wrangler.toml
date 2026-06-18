@@ -53,6 +53,8 @@ APP_URL = "https://coomander.com"
 # Cloudflare Email Service sender (migrated off Resend). Must be an address on a
 # domain onboarded at Cloudflare → Email → Email Sending.
 EMAIL_FROM = "Coomander <noreply@coomander.com>"
+# Agents worker chat enabled in prod (#192) — WS streaming + schedule(); JSON chat is the fallback.
+FLAG_COOMANDER_AGENTS_CHAT = "true"
 
 # ── Cloudflare Email Service (send_email binding) ──────────────────────────
 # Tier-1 transport for lib/email.ts on Workers (zero-config; the binding
