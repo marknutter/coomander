@@ -1,8 +1,13 @@
+import path from "path";
 import type { NextConfig } from "next";
 import { createMDX } from "fumadocs-mdx/next";
 
 const nextConfig: NextConfig = {
   serverExternalPackages: ["better-sqlite3", "pg"],
+  // Monorepo: transpile the workspace-local @coomander/core (ships raw TS).
+  transpilePackages: ["@coomander/core"],
+  // Monorepo: trace from the repo root so hoisted workspace deps are found.
+  outputFileTracingRoot: path.join(__dirname, "../../"),
   // Force-include pg-cloudflare's workerd-conditional files in the standalone
   // server output. Next's File Tracer follows the `node` exports condition,
   // which maps pg-cloudflare to the empty stub (`dist/empty.js`). OpenNext's
@@ -11,7 +16,10 @@ const nextConfig: NextConfig = {
   // them explicitly here keeps the OpenNext build resolvable. Has no effect
   // on Vercel/Node deploys — the empty stub is still chosen at runtime.
   outputFileTracingIncludes: {
-    "*": ["./node_modules/pg-cloudflare/**"],
+    "*": [
+      "../../node_modules/pg-cloudflare/**",
+      "../../node_modules/pg/node_modules/pg-cloudflare/**",
+    ],
   },
   // Allow Next dev (HMR websocket, dev endpoints) to be reached from hosts
   // other than the literal string "localhost". Without this, loading the

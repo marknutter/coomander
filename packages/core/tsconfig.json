@@ -1,0 +1,9 @@
+{
+  "$comment": "@coomander/core must compile without DOM or Node types to stay platform-agnostic.",
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2021"],
+    "types": []
+  },
+  "include": ["src/**/*.ts"]
+}

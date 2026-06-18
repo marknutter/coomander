@@ -1,0 +1,15 @@
+{
+  "$comment": "Shared TypeScript compiler options for all workspaces. Each workspace extends this and adds its own lib/paths.",
+  "compilerOptions": {
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "allowJs": true,
+    "noEmit": true,
+    "target": "ES2017"
+  }
+}

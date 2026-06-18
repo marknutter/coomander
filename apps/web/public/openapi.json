@@ -145,8 +145,8 @@
   },
   "paths": {
     "/analyze/instagram": {
-      "post": {
-        "operationId": "post-analyze-instagram",
+      "get": {
+        "operationId": "get-analyze-instagram",
         "summary": "",
         "description": "",
         "tags": [
@@ -172,8 +172,8 @@
           }
         }
       },
-      "get": {
-        "operationId": "get-analyze-instagram",
+      "post": {
+        "operationId": "post-analyze-instagram",
         "summary": "",
         "description": "",
         "tags": [
@@ -305,6 +305,42 @@
           }
         }
       },
+      "post": {
+        "operationId": "post-coomander-beats",
+        "summary": "",
+        "description": "",
+        "tags": [
+          "Coomander"
+        ],
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "beat": {
+                      "type": "object",
+                      "properties": {}
+                    }
+                  },
+                  "required": [
+                    "beat"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      },
       "patch": {
         "operationId": "patch-coomander-beats",
         "summary": "",
@@ -357,42 +393,6 @@
               "application/json": {
                 "schema": {
                   "type": "object"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/400"
-          },
-          "500": {
-            "$ref": "#/components/responses/500"
-          }
-        }
-      },
-      "post": {
-        "operationId": "post-coomander-beats",
-        "summary": "",
-        "description": "",
-        "tags": [
-          "Coomander"
-        ],
-        "parameters": [],
-        "responses": {
-          "201": {
-            "description": "Successful response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "beat": {
-                      "type": "object",
-                      "properties": {}
-                    }
-                  },
-                  "required": [
-                    "beat"
-                  ]
                 }
               }
             }
@@ -490,6 +490,42 @@
           }
         }
       },
+      "post": {
+        "operationId": "post-coomander-content",
+        "summary": "",
+        "description": "",
+        "tags": [
+          "Coomander"
+        ],
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "content": {
+                      "type": "object",
+                      "properties": {}
+                    }
+                  },
+                  "required": [
+                    "content"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      },
       "patch": {
         "operationId": "patch-coomander-content",
         "summary": "",
@@ -542,42 +578,6 @@
               "application/json": {
                 "schema": {
                   "type": "object"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/400"
-          },
-          "500": {
-            "$ref": "#/components/responses/500"
-          }
-        }
-      },
-      "post": {
-        "operationId": "post-coomander-content",
-        "summary": "",
-        "description": "",
-        "tags": [
-          "Coomander"
-        ],
-        "parameters": [],
-        "responses": {
-          "201": {
-            "description": "Successful response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "content": {
-                      "type": "object",
-                      "properties": {}
-                    }
-                  },
-                  "required": [
-                    "content"
-                  ]
                 }
               }
             }
@@ -658,7 +658,7 @@
                             "type": "string"
                           },
                           "message": {
-                            "type": "object"
+                            "type": "string"
                           }
                         },
                         "required": [
@@ -837,6 +837,42 @@
           }
         }
       },
+      "post": {
+        "operationId": "post-coomander-pillars",
+        "summary": "",
+        "description": "",
+        "tags": [
+          "Coomander"
+        ],
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "pillar": {
+                      "type": "object",
+                      "properties": {}
+                    }
+                  },
+                  "required": [
+                    "pillar"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      },
       "patch": {
         "operationId": "patch-coomander-pillars",
         "summary": "",
@@ -900,42 +936,6 @@
             "$ref": "#/components/responses/500"
           }
         }
-      },
-      "post": {
-        "operationId": "post-coomander-pillars",
-        "summary": "",
-        "description": "",
-        "tags": [
-          "Coomander"
-        ],
-        "parameters": [],
-        "responses": {
-          "201": {
-            "description": "Successful response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "pillar": {
-                      "type": "object",
-                      "properties": {}
-                    }
-                  },
-                  "required": [
-                    "pillar"
-                  ]
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/400"
-          },
-          "500": {
-            "$ref": "#/components/responses/500"
-          }
-        }
       }
     },
     "/coomander/procurement": {
@@ -964,6 +964,42 @@
               "application/json": {
                 "schema": {
                   "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      },
+      "post": {
+        "operationId": "post-coomander-procurement",
+        "summary": "",
+        "description": "",
+        "tags": [
+          "Coomander"
+        ],
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "item": {
+                      "type": "object",
+                      "properties": {}
+                    }
+                  },
+                  "required": [
+                    "item"
+                  ]
                 }
               }
             }
@@ -1039,42 +1075,6 @@
             "$ref": "#/components/responses/500"
           }
         }
-      },
-      "post": {
-        "operationId": "post-coomander-procurement",
-        "summary": "",
-        "description": "",
-        "tags": [
-          "Coomander"
-        ],
-        "parameters": [],
-        "responses": {
-          "201": {
-            "description": "Successful response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "item": {
-                      "type": "object",
-                      "properties": {}
-                    }
-                  },
-                  "required": [
-                    "item"
-                  ]
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/400"
-          },
-          "500": {
-            "$ref": "#/components/responses/500"
-          }
-        }
       }
     },
     "/coomander/run": {
@@ -1095,21 +1095,36 @@
                   "type": "object",
                   "properties": {
                     "ok": {
-                      "type": "boolean"
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
                     },
                     "slot": {
                       "oneOf": [
                         {
-                          "type": "string"
+                          "type": "string",
+                          "enum": [
+                            "morning"
+                          ]
                         },
                         {
-                          "type": "string"
+                          "type": "string",
+                          "enum": [
+                            "midday"
+                          ]
                         },
                         {
-                          "type": "string"
+                          "type": "string",
+                          "enum": [
+                            "check"
+                          ]
                         },
                         {
-                          "type": "string"
+                          "type": "string",
+                          "enum": [
+                            "evening"
+                          ]
                         }
                       ]
                     },
@@ -1127,10 +1142,35 @@
                                 "type": "boolean"
                               },
                               "slot": {
-                                "type": "object"
+                                "oneOf": [
+                                  {
+                                    "type": "string",
+                                    "enum": [
+                                      "morning"
+                                    ]
+                                  },
+                                  {
+                                    "type": "string",
+                                    "enum": [
+                                      "midday"
+                                    ]
+                                  },
+                                  {
+                                    "type": "string",
+                                    "enum": [
+                                      "check"
+                                    ]
+                                  },
+                                  {
+                                    "type": "string",
+                                    "enum": [
+                                      "evening"
+                                    ]
+                                  }
+                                ]
                               },
                               "sent": {
-                                "type": "object"
+                                "type": "boolean"
                               },
                               "skipped": {
                                 "oneOf": [
@@ -1143,13 +1183,27 @@
                                 ]
                               },
                               "message": {
-                                "type": "object"
+                                "oneOf": [
+                                  {
+                                    "type": "object"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
                               },
                               "error": {
-                                "type": "object"
+                                "oneOf": [
+                                  {
+                                    "type": "object"
+                                  },
+                                  {
+                                    "type": "string"
+                                  }
+                                ]
                               },
                               "userId": {
-                                "type": "object"
+                                "type": "string"
                               }
                             },
                             "required": [
@@ -1163,19 +1217,44 @@
                             "type": "object",
                             "properties": {
                               "userId": {
-                                "type": "object"
+                                "type": "string"
                               },
                               "ok": {
-                                "type": "object"
+                                "type": "boolean"
                               },
                               "slot": {
-                                "type": "object"
+                                "oneOf": [
+                                  {
+                                    "type": "string",
+                                    "enum": [
+                                      "morning"
+                                    ]
+                                  },
+                                  {
+                                    "type": "string",
+                                    "enum": [
+                                      "midday"
+                                    ]
+                                  },
+                                  {
+                                    "type": "string",
+                                    "enum": [
+                                      "check"
+                                    ]
+                                  },
+                                  {
+                                    "type": "string",
+                                    "enum": [
+                                      "evening"
+                                    ]
+                                  }
+                                ]
                               },
                               "sent": {
-                                "type": "object"
+                                "type": "boolean"
                               },
                               "error": {
-                                "type": "object"
+                                "type": "string"
                               }
                             },
                             "required": [
@@ -1441,7 +1520,10 @@
                   "type": "object",
                   "properties": {
                     "ok": {
-                      "type": "boolean"
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
                     },
                     "ignored": {
                       "type": "string"
@@ -1555,7 +1637,10 @@
                   "type": "object",
                   "properties": {
                     "ok": {
-                      "type": "boolean"
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
                     },
                     "weekEnding": {
                       "type": "string"
@@ -1569,7 +1654,7 @@
                         "type": "object",
                         "properties": {
                           "userId": {
-                            "type": "object"
+                            "type": "string"
                           },
                           "ok": {
                             "type": "boolean"
@@ -1580,12 +1665,19 @@
                                 "type": "object"
                               },
                               {
-                                "type": "object"
+                                "type": "string"
                               }
                             ]
                           },
                           "error": {
-                            "type": "object"
+                            "oneOf": [
+                              {
+                                "type": "object"
+                              },
+                              {
+                                "type": "string"
+                              }
+                            ]
                           }
                         },
                         "required": [
@@ -1700,10 +1792,10 @@
                       "type": "boolean"
                     },
                     "db": {
-                      "type": "object"
+                      "type": "boolean"
                     },
                     "auth": {
-                      "type": "object"
+                      "type": "boolean"
                     },
                     "timestamp": {
                       "type": "string"
@@ -2056,7 +2148,10 @@
                       "type": "object",
                       "properties": {
                         "unsubscribed": {
-                          "type": "boolean"
+                          "type": "boolean",
+                          "enum": [
+                            true
+                          ]
                         }
                       },
                       "required": [
@@ -2122,7 +2217,7 @@
                       "type": "number"
                     },
                     "referralCode": {
-                      "type": "object"
+                      "type": "string"
                     }
                   },
                   "required": [
@@ -2148,7 +2243,7 @@
                       "type": "number"
                     },
                     "referralCode": {
-                      "type": "object"
+                      "type": "string"
                     }
                   },
                   "required": [

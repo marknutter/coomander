@@ -1,0 +1,25 @@
+{
+  "name": "@coomander/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Platform-agnostic core: Zod schemas, shared types, and a typed API client. No next/*, drizzle, better-sqlite3, react-dom, Node built-ins, or DOM globals (must run in React Native).",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "better-auth": "1.4.18",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "typescript": "^5"
+  }
+}
