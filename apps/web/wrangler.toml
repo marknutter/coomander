@@ -41,6 +41,10 @@ assets = { directory = ".open-next/assets", binding = "ASSETS" }
 crons = ["0 12 * * *", "0 18 * * *", "0 21 * * *", "0 1 * * *", "0 1 * * 1"]
 
 # Plain env vars (non-secret). Secrets go through `wrangler secret put`.
+# Agents Worker (#192): AGENTS_INTERNAL_SECRET is a SECRET (not listed here) —
+# set with `wrangler secret put AGENTS_INTERNAL_SECRET` and it MUST match the
+# value set on the coomander-agents Worker (apps/agents). It authenticates the
+# agent's server-to-server /api/internal/* calls for scheduled wakes.
 [vars]
 DATABASE_DRIVER = "d1"
 APP_NAME = "Coomander"

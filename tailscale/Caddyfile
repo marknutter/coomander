@@ -25,5 +25,13 @@
 	tls {
 		get_certificate tailscale
 	}
+
+	# Agents Worker (Cloudflare Agents SDK sidecar, #192) — wrangler dev binds
+	# 8788 on the shared netns. /agents/* (incl. the WebSocket upgrade) must
+	# route here, NOT to next dev, or the in-app streaming chat can't reach the
+	# AppAgent Durable Object. Same-origin so the Better Auth cookie flows.
+	reverse_proxy /agents/* http://127.0.0.1:8788
+
+	# Everything else → next dev.
 	reverse_proxy http://127.0.0.1:3000
 }

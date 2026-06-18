@@ -277,6 +277,102 @@
         }
       }
     },
+    "/coomander/agent-context": {
+      "get": {
+        "operationId": "get-coomander-agent-context",
+        "summary": "GET /api/coomander/agent-context — per-turn chat context for the agents",
+        "description": "",
+        "tags": [
+          "Coomander"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
+    "/coomander/agent-tool": {
+      "post": {
+        "operationId": "post-coomander-agent-tool",
+        "summary": "POST /api/coomander/agent-tool — execute one Coomander tool call for the",
+        "description": "",
+        "tags": [
+          "Coomander"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "action": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "note": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "action",
+                    "note"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "402": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "upgrade": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "upgrade"
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
     "/coomander/beats": {
       "get": {
         "operationId": "get-coomander-beats",
@@ -763,6 +859,71 @@
           },
           "400": {
             "$ref": "#/components/responses/400"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
+    "/coomander/messages": {
+      "post": {
+        "operationId": "post-coomander-messages",
+        "summary": "POST /api/coomander/messages — append one turn to the user's Coomander thread",
+        "description": "",
+        "tags": [
+          "Coomander"
+        ],
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "402": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "upgrade": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "upgrade"
+                  ]
+                }
+              }
+            }
           },
           "500": {
             "$ref": "#/components/responses/500"
@@ -1771,6 +1932,65 @@
         }
       }
     },
+    "/flags": {
+      "get": {
+        "operationId": "get-flags",
+        "summary": "GET /api/flags — Evaluate feature flags for the current user.",
+        "description": "",
+        "tags": [
+          "Flags"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "flags": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "oneOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "boolean",
+                            "enum": [
+                              false
+                            ]
+                          },
+                          {
+                            "type": "boolean",
+                            "enum": [
+                              true
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "flags"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
     "/health": {
       "get": {
         "operationId": "get-health",
@@ -1816,6 +2036,198 @@
           },
           "500": {
             "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
+    "/internal/conversation-message": {
+      "post": {
+        "operationId": "post-internal-conversation-message",
+        "summary": "Internal server-to-server endpoint for the agents Worker to append a message",
+        "description": "",
+        "tags": [
+          "Internal"
+        ],
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "403": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          },
+          "503": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/telegram-deliver": {
+      "post": {
+        "operationId": "post-internal-telegram-deliver",
+        "summary": "Internal server-to-server endpoint for the agents Worker's proactive-delivery",
+        "description": "",
+        "tags": [
+          "Internal"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "delivered": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "reason": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "delivered",
+                    "reason"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "403": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          },
+          "503": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
           }
         }
       }
@@ -2310,7 +2722,13 @@
       "name": "Coomander"
     },
     {
+      "name": "Flags"
+    },
+    {
       "name": "Health"
+    },
+    {
+      "name": "Internal"
     },
     {
       "name": "Platforms"

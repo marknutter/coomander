@@ -1,0 +1,8 @@
+# wrangler dev local state (DO SQLite, KV, cache) — persisted across container
+# restarts via the repo bind mount, but never committed.
+.wrangler/
+dist/
+
+# Local dev secrets for `wrangler dev` (ANTHROPIC_API_KEY, AGENTS_INTERNAL_SECRET).
+# Copy .dev.vars.example → .dev.vars and fill in. The example is committed.
+.dev.vars

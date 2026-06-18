@@ -13,8 +13,9 @@
  * One assistant, not two: this replaces the old `/app/chat` template chatbot.
  */
 
-import { useState, useEffect, useRef, useCallback, Suspense } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
+import dynamic from "next/dynamic";
 import {
   Bot, Send, Mic, MicOff, Loader2, Sparkles, CheckCircle2,
 } from "lucide-react";
@@ -23,6 +24,15 @@ import { useVoice } from "@/lib/use-voice";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/lib/use-toast";
+import type { AgentChatCallbacks, AgentChatHandle } from "@/lib/use-agent-chat";
+
+// Lazy bridge to the WebSocket Coomander transport (Cloudflare Agents SDK, #192).
+// Loaded via next/dynamic({ ssr: false }) and mounted ONLY when the
+// `coomander-agents-chat` flag is on, so flag-off users never bundle or load the
+// agent client — the POST /api/coomander/chat path stays byte-for-byte as it was.
+const AgentChatBridge = dynamic(() => import("@/components/agent-chat-bridge"), {
+  ssr: false,
+});
 
 interface Message {
   id: string;
@@ -54,6 +64,20 @@ function CoomanderChat() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const sendingRef = useRef(false);
 
+  // ── Agents-chat (WebSocket) transport, flag-gated (#192) ──────────────────
+  // wsEnabled mirrors the `coomander-agents-chat` flag; the bridge (and thus
+  // the socket) only mounts while flag-on + ops enabled. streamText is the live
+  // streaming assistant bubble (null = no WS turn in flight); wsTurnRef marks a
+  // turn sent over the socket so a mid-turn disconnect cleans up without
+  // touching POST-path turns.
+  const [wsEnabled, setWsEnabled] = useState(false);
+  const [streamText, setStreamText] = useState<string | null>(null);
+  const wsTurnRef = useRef(false);
+  const agentHandleRef = useRef<AgentChatHandle | null>(null);
+  const setAgentHandle = useCallback((h: AgentChatHandle | null) => {
+    agentHandleRef.current = h;
+  }, []);
+
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, []);
@@ -82,6 +106,75 @@ function CoomanderChat() {
       });
   }, [loadThread, scrollToBottom]);
 
+  // Resolve the coomander-agents-chat flag once on mount (#192). The agent
+  // socket only connects after this resolves true AND ops is enabled. Flag-off
+  // (the default until the agents Worker is deployed) keeps the POST path.
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/flags")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!cancelled) setWsEnabled(Boolean(d?.flags?.["coomander-agents-chat"]));
+      })
+      .catch(() => {
+        // Flag endpoint unavailable — stay on the POST path.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Callbacks the WebSocket bridge invokes. Coomander has one unified thread, so
+  // the conversation id is always the "coomander" sentinel and there's nothing
+  // to track per turn — on done/proactive we reload the canonical thread (real
+  // ids, ordering, tool side effects), matching the POST path's refresh.
+  const agentCallbacks = useMemo<AgentChatCallbacks>(
+    () => ({
+      onConversation: () => {},
+      onToken: (text) => setStreamText((prev) => (prev ?? "") + text),
+      onDone: async () => {
+        wsTurnRef.current = false;
+        setSending(false);
+        sendingRef.current = false;
+        await loadThread().catch(() => {});
+        setStreamText(null);
+      },
+      onError: (message) => {
+        wsTurnRef.current = false;
+        setStreamText(null);
+        setSending(false);
+        sendingRef.current = false;
+        setMessages((m) => [
+          ...m,
+          { id: `err-${Date.now()}`, role: "assistant", content: message },
+        ]);
+      },
+      // An agent-initiated message outside any user turn (a schedule_followup
+      // reminder). When it carries the thread id it was already persisted
+      // server-side — reload so it renders in place and survives refresh.
+      onProactive: (_message, conversationId) => {
+        if (conversationId) {
+          loadThread().catch(() => {});
+        } else {
+          setMessages((m) => [
+            ...m,
+            { id: `proactive-${Date.now()}`, role: "assistant", content: _message },
+          ]);
+        }
+      },
+      onStatusChange: (status) => {
+        // A mid-turn disconnect would otherwise leave the spinner forever.
+        if (status === "closed" && wsTurnRef.current) {
+          wsTurnRef.current = false;
+          setStreamText(null);
+          setSending(false);
+          sendingRef.current = false;
+        }
+      },
+    }),
+    [loadThread]
+  );
+
   // Light polling so a message sent on Telegram appears here without a manual
   // refresh (and vice versa). Skipped while a turn is in flight to avoid
   // clobbering the optimistic user bubble.
@@ -104,8 +197,8 @@ function CoomanderChat() {
     return () => clearInterval(t);
   }, [enabled]);
 
-  // Auto-scroll on new messages.
-  useEffect(() => { scrollToBottom(); }, [messages, sending, scrollToBottom]);
+  // Auto-scroll on new messages (and as WS tokens stream in).
+  useEffect(() => { scrollToBottom(); }, [messages, sending, streamText, scrollToBottom]);
 
   // Auto-resize the textarea.
   useEffect(() => {
@@ -136,6 +229,20 @@ function CoomanderChat() {
     setInput("");
     setSending(true);
     sendingRef.current = true;
+
+    // Flag-on path: stream the turn over the WebSocket to the user's AppAgent
+    // (#192). Falls through to the POST path whenever the socket isn't open
+    // (flag off, pre-connect window, prod before the agents Worker route is
+    // live, or a reconnect in progress) — the POST path stays the universal
+    // fallback. onDone/onError reset sending + reload the canonical thread.
+    if (wsEnabled && enabled && agentHandleRef.current?.ready()) {
+      const ok = agentHandleRef.current.send({ conversationId: "coomander", message: text });
+      if (ok) {
+        wsTurnRef.current = true;
+        setStreamText("");
+        return;
+      }
+    }
 
     try {
       const res = await fetch("/api/coomander/chat", {
@@ -286,8 +393,17 @@ function CoomanderChat() {
             </div>
           ))}
 
-          {/* Thinking indicator */}
-          {sending && (
+          {/* Live streaming assistant bubble (WebSocket path, #192). */}
+          {streamText !== null && streamText.length > 0 && (
+            <div className="flex justify-start">
+              <div className="max-w-[80%] rounded-2xl px-4 py-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100">
+                <ChatMessageContent content={streamText} role="assistant" />
+              </div>
+            </div>
+          )}
+
+          {/* Thinking indicator — suppressed once tokens stream over the WS. */}
+          {sending && !streamText && (
             <div className="flex justify-start">
               <div className="rounded-2xl px-4 py-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
                 <Loader2 className="w-4 h-4 animate-spin text-gray-400" />
@@ -311,6 +427,14 @@ function CoomanderChat() {
 
       {/* Hidden audio element for TTS */}
       <audio ref={audioRef} className="hidden" />
+
+      {/* WebSocket transport bridge (#192) — mounted only when the
+          coomander-agents-chat flag is on AND ops is enabled. This is the only
+          thing that ever opens the agent WebSocket; flag-off users never load
+          it and the POST /api/coomander/chat path is unchanged. */}
+      {wsEnabled && enabled && !loading && (
+        <AgentChatBridge callbacks={agentCallbacks} onHandle={setAgentHandle} />
+      )}
 
       {/* Composer */}
       <div className="border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-4 py-3">
