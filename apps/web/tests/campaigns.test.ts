@@ -1,220 +1,144 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// ─── Mock Resend ────────────────────────────────────────────────────────────
+// ─── Mock the email transport + DB + tracking ───────────────────────────────
+//
+// Email/broadcasts use Cloudflare Email Service (#374 / PR #383). The dead
+// Resend-era sendBroadcast() / syncSubscribersToAudience() helpers were removed
+// in #430; lib/broadcasts.ts now exposes only:
+//   - sendCampaignDirect(campaignId, subject, html, emails)
+//       loops over the email list, applies open/click tracking to the html,
+//       calls sendEmail() once per recipient, logs a "sent" event row into
+//       email_events via getDb(), and counts sent/failed.
+//
+// We mock @/lib/email so sendEmail is a spy we can drive and assert against,
+// @/lib/db so the event-logging insert is an observable no-op spy, and
+// @/lib/email-tracking so applyCampaignTracking is a passthrough — the broadcast
+// tests don't depend on tracking internals (those are covered in
+// tests/email-tracking.test.ts).
 
-const mockBroadcastsCreate = vi.fn();
-const mockBroadcastsSend = vi.fn();
-const mockContactsCreate = vi.fn();
-const mockBatchSend = vi.fn();
+const { mockSendEmail, mockInsertRun, mockApplyTracking } = vi.hoisted(() => ({
+  mockSendEmail: vi.fn(),
+  mockInsertRun: vi.fn(),
+  mockApplyTracking: vi.fn(),
+}));
 
-vi.mock("resend", () => {
+vi.mock("@/lib/email", () => ({
+  sendEmail: mockSendEmail,
+  FROM: "Test App <noreply@test.com>",
+}));
+
+// applyCampaignTracking is a passthrough by default — return the html untouched
+// so broadcast assertions on the rendered html stay stable.
+vi.mock("@/lib/email-tracking", () => ({
+  applyCampaignTracking: mockApplyTracking,
+}));
+
+// getDb().insert(...).values(...).run() chain — a no-op spy on .run().
+// .select().from().where().all() chain preserved for any callers that use it.
+vi.mock("@/lib/db", () => {
+  const insertChain = {
+    values: vi.fn(() => ({ run: mockInsertRun })),
+  };
+  const selectChain = {
+    from: vi.fn(() => ({
+      where: vi.fn(() => ({
+        all: vi.fn(() => []),
+      })),
+    })),
+  };
   return {
-    Resend: class MockResend {
-      emails = { send: vi.fn() };
-      broadcasts = { create: mockBroadcastsCreate, send: mockBroadcastsSend };
-      contacts = { create: mockContactsCreate };
-      batch = { send: mockBatchSend };
-    },
+    getDb: vi.fn(() => ({
+      insert: vi.fn(() => insertChain),
+      select: vi.fn(() => selectChain),
+    })),
   };
 });
-
-// ─── Mock DB for syncSubscribersToAudience ──────────────────────────────────
-
-const mockAll = vi.fn().mockReturnValue([]);
-const mockWhere = vi.fn().mockReturnValue({ all: mockAll });
-const mockFrom = vi.fn().mockReturnValue({ where: mockWhere });
-const mockSelect = vi.fn().mockReturnValue({ from: mockFrom });
-
-vi.mock("@/lib/db", () => ({
-  getDb: () => ({ select: mockSelect }),
-  getRawDb: () => ({}),
-}));
 
 // Mock schema to avoid SQLite/PG dialect resolution
 vi.mock("@/lib/schema", () => ({
   newsletterSubscribers: { email: "email", status: "status" },
   emailCampaigns: { id: "id", name: "name", subject: "subject", status: "status", preview_text: "preview_text", html_content: "html_content", audience_filter: "audience_filter", recipient_count: "recipient_count", sent_count: "sent_count", scheduled_at: "scheduled_at", sent_at: "sent_at", resend_broadcast_id: "resend_broadcast_id", created_by: "created_by", created_at: "created_at", updated_at: "updated_at" },
+  emailEvents: { email_id: "email_id", campaign_id: "campaign_id", subscriber_email: "subscriber_email", event_type: "event_type" },
 }));
 
 // ─── Imports (after mocks) ──────────────────────────────────────────────────
 
-import {
-  sendBroadcast,
-  syncSubscribersToAudience,
-  sendCampaignDirect,
-} from "@/lib/broadcasts";
-import type { BroadcastPayload } from "@/lib/broadcasts";
+import { sendCampaignDirect } from "@/lib/broadcasts";
 import { PERMISSIONS, PERMISSION_GROUPS } from "@/lib/permissions";
 import { emailCampaigns } from "@/lib/schema";
-
-// ─── sendBroadcast ──────────────────────────────────────────────────────────
-
-describe("sendBroadcast", () => {
-  beforeEach(() => {
-    mockBroadcastsCreate.mockReset();
-    mockBroadcastsSend.mockReset();
-  });
-
-  const payload: BroadcastPayload = {
-    name: "April Newsletter",
-    subject: "Big news!",
-    html: "<h1>Hello</h1>",
-    audienceId: "aud_123",
-  };
-
-  it("creates a broadcast then sends it, returning the id", async () => {
-    mockBroadcastsCreate.mockResolvedValue({ data: { id: "bc_abc" } });
-    mockBroadcastsSend.mockResolvedValue({});
-
-    const result = await sendBroadcast(payload);
-
-    expect(result).toEqual({ id: "bc_abc" });
-    expect(mockBroadcastsCreate).toHaveBeenCalledOnce();
-    expect(mockBroadcastsCreate.mock.calls[0][0]).toMatchObject({
-      audienceId: "aud_123",
-      subject: "Big news!",
-      html: "<h1>Hello</h1>",
-      name: "April Newsletter",
-    });
-    expect(mockBroadcastsSend).toHaveBeenCalledWith("bc_abc", undefined);
-  });
-
-  it("passes scheduledAt when provided", async () => {
-    mockBroadcastsCreate.mockResolvedValue({ data: { id: "bc_xyz" } });
-    mockBroadcastsSend.mockResolvedValue({});
-
-    await sendBroadcast({ ...payload, scheduledAt: "2026-05-01T12:00:00Z" });
-
-    expect(mockBroadcastsSend).toHaveBeenCalledWith("bc_xyz", {
-      scheduledAt: "2026-05-01T12:00:00Z",
-    });
-  });
-
-  it("passes previewText when provided", async () => {
-    mockBroadcastsCreate.mockResolvedValue({ data: { id: "bc_pt" } });
-    mockBroadcastsSend.mockResolvedValue({});
-
-    await sendBroadcast({ ...payload, previewText: "Sneak peek" });
-
-    expect(mockBroadcastsCreate.mock.calls[0][0]).toMatchObject({
-      previewText: "Sneak peek",
-    });
-  });
-
-  it("throws when create returns no id", async () => {
-    mockBroadcastsCreate.mockResolvedValue({ data: null });
-
-    await expect(sendBroadcast(payload)).rejects.toThrow(
-      "Failed to create broadcast"
-    );
-    expect(mockBroadcastsSend).not.toHaveBeenCalled();
-  });
-});
 
 // ─── sendCampaignDirect ─────────────────────────────────────────────────────
 
 describe("sendCampaignDirect", () => {
   beforeEach(() => {
-    mockBatchSend.mockReset();
+    mockSendEmail.mockReset();
+    mockInsertRun.mockReset();
+    // Passthrough: tracking returns the html unchanged.
+    mockApplyTracking.mockReset().mockImplementation((html: string) => html);
   });
 
-  it("sends a single batch for <= 100 emails", async () => {
-    mockBatchSend.mockResolvedValue({});
+  it("sends one email per recipient and counts them all as sent", async () => {
+    mockSendEmail.mockResolvedValue({ messageId: "m-1" });
     const emails = Array.from({ length: 5 }, (_, i) => `user${i}@test.com`);
 
-    const result = await sendCampaignDirect("Hello", "<p>Hi</p>", emails);
+    const result = await sendCampaignDirect("camp-1", "Hello", "<p>Hi</p>", emails);
 
     expect(result).toEqual({ sent: 5, failed: 0 });
-    expect(mockBatchSend).toHaveBeenCalledOnce();
-    const batch = mockBatchSend.mock.calls[0][0];
-    expect(batch).toHaveLength(5);
-    expect(batch[0]).toMatchObject({
+    expect(mockSendEmail).toHaveBeenCalledTimes(5);
+    expect(mockSendEmail.mock.calls[0][0]).toMatchObject({
       to: "user0@test.com",
       subject: "Hello",
       html: "<p>Hi</p>",
     });
   });
 
-  it("splits into multiple batches of 100", async () => {
-    mockBatchSend.mockResolvedValue({});
+  it("sends one email per recipient for large lists", async () => {
+    mockSendEmail.mockResolvedValue({ messageId: "m-1" });
     const emails = Array.from({ length: 250 }, (_, i) => `u${i}@test.com`);
 
-    const result = await sendCampaignDirect("Subj", "<p>Body</p>", emails);
+    const result = await sendCampaignDirect("camp-2", "Subj", "<p>Body</p>", emails);
 
+    // Individual sends (no batching) — one call per recipient.
     expect(result).toEqual({ sent: 250, failed: 0 });
-    // 250 emails → 3 batches: 100, 100, 50
-    expect(mockBatchSend).toHaveBeenCalledTimes(3);
-    expect(mockBatchSend.mock.calls[0][0]).toHaveLength(100);
-    expect(mockBatchSend.mock.calls[1][0]).toHaveLength(100);
-    expect(mockBatchSend.mock.calls[2][0]).toHaveLength(50);
+    expect(mockSendEmail).toHaveBeenCalledTimes(250);
   });
 
-  it("counts failures when a batch throws", async () => {
-    mockBatchSend
-      .mockResolvedValueOnce({}) // first 100 succeed
-      .mockRejectedValueOnce(new Error("rate limit")); // second 100 fail
-    const emails = Array.from({ length: 200 }, (_, i) => `u${i}@test.com`);
+  it("counts failures when individual sends throw", async () => {
+    // First 100 succeed, next 100 fail, last 50 succeed → 200 sent, 100 failed.
+    mockSendEmail.mockImplementation((params: { to: string }) => {
+      const idx = Number(params.to.replace(/\D/g, ""));
+      if (idx >= 100 && idx < 200) {
+        return Promise.reject(new Error("rate limit"));
+      }
+      return Promise.resolve({ messageId: "m-1" });
+    });
+    const emails = Array.from({ length: 250 }, (_, i) => `u${i}@test.com`);
 
-    const result = await sendCampaignDirect("Subj", "<p>Body</p>", emails);
+    const result = await sendCampaignDirect("camp-3", "Subj", "<p>Body</p>", emails);
 
-    expect(result).toEqual({ sent: 100, failed: 100 });
+    expect(result).toEqual({ sent: 150, failed: 100 });
   });
 
   it("returns zero counts for empty email list", async () => {
-    const result = await sendCampaignDirect("Subj", "<p>Body</p>", []);
+    const result = await sendCampaignDirect("camp-4", "Subj", "<p>Body</p>", []);
 
     expect(result).toEqual({ sent: 0, failed: 0 });
-    expect(mockBatchSend).not.toHaveBeenCalled();
-  });
-});
-
-// ─── syncSubscribersToAudience ──────────────────────────────────────────────
-
-describe("syncSubscribersToAudience", () => {
-  beforeEach(() => {
-    mockAll.mockReset();
-    mockContactsCreate.mockReset();
+    expect(mockSendEmail).not.toHaveBeenCalled();
   });
 
-  it("upserts each active subscriber and returns synced count", async () => {
-    mockAll.mockReturnValue([
-      { email: "a@test.com" },
-      { email: "b@test.com" },
-    ]);
-    mockContactsCreate.mockResolvedValue({});
-
-    const result = await syncSubscribersToAudience("aud_456");
-
-    expect(result).toEqual({ synced: 2 });
-    expect(mockContactsCreate).toHaveBeenCalledTimes(2);
-    expect(mockContactsCreate).toHaveBeenCalledWith({
-      audienceId: "aud_456",
-      email: "a@test.com",
+  it("does not count a send as failed when event-logging insert throws", async () => {
+    // The send succeeds, but logging the "sent" event row blows up. That must
+    // NOT flip the send from sent→failed — the email already went out.
+    mockSendEmail.mockResolvedValue({ messageId: "m-1" });
+    mockInsertRun.mockImplementation(() => {
+      throw new Error("db write failed");
     });
-  });
+    const emails = Array.from({ length: 3 }, (_, i) => `user${i}@test.com`);
 
-  it("silently skips contacts that throw (already exists)", async () => {
-    mockAll.mockReturnValue([
-      { email: "a@test.com" },
-      { email: "b@test.com" },
-    ]);
-    mockContactsCreate
-      .mockRejectedValueOnce(new Error("conflict"))
-      .mockResolvedValueOnce({});
+    const result = await sendCampaignDirect("camp-5", "Subj", "<p>Body</p>", emails);
 
-    const result = await syncSubscribersToAudience("aud_456");
-
-    // First fails (skipped), second succeeds
-    expect(result).toEqual({ synced: 1 });
-  });
-
-  it("returns zero when there are no subscribers", async () => {
-    mockAll.mockReturnValue([]);
-
-    const result = await syncSubscribersToAudience("aud_456");
-
-    expect(result).toEqual({ synced: 0 });
-    expect(mockContactsCreate).not.toHaveBeenCalled();
+    expect(result).toEqual({ sent: 3, failed: 0 });
+    expect(mockSendEmail).toHaveBeenCalledTimes(3);
   });
 });
 

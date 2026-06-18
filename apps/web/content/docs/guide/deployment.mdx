@@ -193,10 +193,33 @@ bash scripts/litestream-restore.sh ./data/restored.db
 |----------|-------------|
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google OAuth |
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | GitHub OAuth |
-| `RESEND_API_KEY` | Resend transactional email |
+| `EMAIL_FROM` | Sender address (e.g. `Coomander <noreply@yourdomain.com>`) |
+| `CLOUDFLARE_ACCOUNT_ID` | For the email REST fallback (off-Workers / dev) |
+| `CF_EMAIL_API_TOKEN` | CF token with "Email Sending" perms (REST fallback) |
+| `EMAIL_TRACKING_SECRET` | HMAC key for open/click tracking (falls back to `BETTER_AUTH_SECRET`) |
 | `STRIPE_SECRET_KEY` | Stripe API key |
 | `STRIPE_PRICE_ID` | Stripe subscription price ID |
 | `STRIPE_WEBHOOK_SECRET` | Stripe webhook signing secret |
+
+## Email (Cloudflare Email Service)
+
+Transactional + campaign email is sent via **Cloudflare Email Service** (migrated
+off Resend). `lib/email.ts` uses a three-tier transport: the `[[send_email]]`
+Workers binding (`name = "EMAIL"` in `wrangler.toml`) in production, the REST API
+(`CLOUDFLARE_ACCOUNT_ID` + `CF_EMAIL_API_TOKEN`) off-Workers, and a console
+fallback in dev (auth links are printed so flows work with no provider).
+
+**Operator setup (once):**
+
+1. Dashboard → **Email → Email Sending** → **Onboard a domain**; add the
+   generated **SPF / DKIM / DMARC / MX** DNS records and wait for verification.
+2. While the domain is in **sandbox**, Cloudflare only delivers to **verified
+   destination addresses** — add your test recipients under Email Sending, or
+   you'll see "sent" with nothing arriving. Request production access to lift it.
+3. Set `EMAIL_FROM` to an address on the onboarded domain (`wrangler.toml [vars]`).
+4. For the REST fallback only: create an API token with **Email Sending**
+   permission and `wrangler secret put CF_EMAIL_API_TOKEN` (+ set
+   `CLOUDFLARE_ACCOUNT_ID`). On Workers the `send_email` binding needs neither.
 
 ## Health check endpoint
 
