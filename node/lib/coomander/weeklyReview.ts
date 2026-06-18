@@ -20,8 +20,8 @@ import {
   weeklyReviews,
   type CadencePillar, type CadenceBeat, type Drop, type ProcurementItem,
 } from "@/lib/schema";
-import { contentCushionDays, daysBetween, toDateUTC } from "./consistency";
-import { getCoomanderSettings, type PersonaMode } from "./settings";
+import { contentCushionDays, daysBetween, toDateLocal } from "./consistency";
+import { getCoomanderSettings, getTimezone, type PersonaMode } from "./settings";
 import { coomanderSystem } from "./agentPrompts";
 import { logCoomanderUsage } from "./usage";
 
@@ -68,6 +68,7 @@ export interface WeeklyReview extends DeterministicReview, ReviewNarrative {
 
 export interface DeterministicInputs {
   userId: string;
+  tz: string; // creator's IANA timezone, for local-day bucketing (#183)
   weekEnding: string; // Sunday YYYY-MM-DD
   pillars: CadencePillar[];
   beats: CadenceBeat[];
@@ -149,7 +150,7 @@ export function buildDeterministicReview(inp: DeterministicInputs): Deterministi
   // Procurement buckets.
   const isOpen = (p: ProcurementItem) => p.status === "needed" || p.status === "ordered";
   const received_this_week = inp.procurement.filter(
-    (p) => p.status === "received" && toDateUTC(p.updated_at) >= weekStart && toDateUTC(p.updated_at) <= inp.weekEnding,
+    (p) => p.status === "received" && toDateLocal(p.updated_at, inp.tz) >= weekStart && toDateLocal(p.updated_at, inp.tz) <= inp.weekEnding,
   );
   const overdue = inp.procurement.filter((p) => isOpen(p) && p.needed_by != null && p.needed_by < inp.weekEnding);
   const twoWeeks = new Date(Date.parse(inp.weekEnding + "T00:00:00Z") + 14 * 86400000).toISOString().slice(0, 10);
@@ -158,7 +159,7 @@ export function buildDeterministicReview(inp: DeterministicInputs): Deterministi
   );
 
   // Consistency.
-  const activeDays = new Set(inp.weekDrops.filter((d) => beatIds.has(d.beat_id)).map((d) => toDateUTC(d.dropped_at)));
+  const activeDays = new Set(inp.weekDrops.filter((d) => beatIds.has(d.beat_id)).map((d) => toDateLocal(d.dropped_at, inp.tz)));
   const distinctActive = [...activeDays].filter((d) => d >= weekStart && d <= inp.weekEnding).length;
   const consistency = {
     longest_streak_days: longestStreakInWeek(activeDays, weekStart, inp.weekEnding),
@@ -258,9 +259,8 @@ export interface BuildOptions {
 
 export async function buildWeeklyReview(userId: string, weekEnding: string, opts: BuildOptions = {}): Promise<WeeklyReview> {
   const db = getDb();
+  const tz = await getTimezone(userId);
   const weekStart = weekStartFor(weekEnding);
-  const weekStartUnix = Math.floor(Date.parse(weekStart + "T00:00:00Z") / 1000);
-  const weekEndUnix = Math.floor(Date.parse(weekEnding + "T23:59:59Z") / 1000);
 
   const [pillars, beats, allDrops, content, procurement, dayStates] = await Promise.all([
     db.select().from(cadencePillars).where(eq(cadencePillars.user_id, userId)) as Promise<CadencePillar[]>,
@@ -271,12 +271,17 @@ export async function buildWeeklyReview(userId: string, weekEnding: string, opts
     db.select().from(coomanderDayState).where(eq(coomanderDayState.user_id, userId)) as Promise<Array<{ date: string; day_quality: string | null }>>,
   ]);
 
-  const weekDrops = allDrops.filter((d) => d.dropped_at >= weekStartUnix && d.dropped_at <= weekEndUnix);
-  const allShippedDropDates = allDrops.filter((d) => d.kind === "shipped").map((d) => toDateUTC(d.dropped_at));
+  // Bucket by the creator's LOCAL day (#183): a drop's week membership and the
+  // shipped-recency dates use toDateLocal, consistent with the daily TodayModel.
+  const weekDrops = allDrops.filter((d) => {
+    const ld = toDateLocal(d.dropped_at, tz);
+    return ld >= weekStart && ld <= weekEnding;
+  });
+  const allShippedDropDates = allDrops.filter((d) => d.kind === "shipped").map((d) => toDateLocal(d.dropped_at, tz));
   const badDayCount = dayStates.filter((s) => s.day_quality === "bad" && s.date >= weekStart && s.date <= weekEnding).length;
 
   const det = buildDeterministicReview({
-    userId, weekEnding, pillars, beats, weekDrops, allShippedDropDates, content, procurement, badDayCount,
+    userId, tz, weekEnding, pillars, beats, weekDrops, allShippedDropDates, content, procurement, badDayCount,
   });
 
   const settings = await getCoomanderSettings(userId);
@@ -288,7 +293,7 @@ export async function buildWeeklyReview(userId: string, weekEnding: string, opts
     narrative = { highlights: [], drift: [], next_week_focus: "", drift_questions: [] };
   }
 
-  return { ...det, ...narrative, generated_at: new Date(weekEndUnix * 1000).toISOString(), model: MODEL };
+  return { ...det, ...narrative, generated_at: new Date().toISOString(), model: MODEL };
 }
 
 /** Latest stored review for a user (Manager Brief #145 consumes this). Null if none. */
