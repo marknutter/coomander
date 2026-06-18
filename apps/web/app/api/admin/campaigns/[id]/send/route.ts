@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq, and } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { logAdminAction } from "@/lib/admin";
 import { requirePermission } from "@/lib/rbac";
 import { PERMISSIONS } from "@/lib/permissions";
 import { getDb } from "@/lib/db";
 import { emailCampaigns, newsletterSubscribers } from "@/lib/schema";
 import { queryFirst } from "@/lib/db-helpers";
-import { sendBroadcast, sendCampaignDirect } from "@/lib/broadcasts";
+import { sendCampaignDirect } from "@/lib/broadcasts";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -39,55 +39,32 @@ export async function POST(
     .run();
 
   try {
-    const audienceId = process.env.RESEND_AUDIENCE_ID;
+    // Cloudflare Email Service has no audience/broadcast API, so campaigns are
+    // always sent directly to our active subscribers, one email per recipient.
+    const subscribers = await db
+      .select({ email: newsletterSubscribers.email })
+      .from(newsletterSubscribers)
+      .where(eq(newsletterSubscribers.status, "active"))
+      .all();
 
-    if (audienceId) {
-      // Use Resend Broadcasts API
-      const result = await sendBroadcast({
-        name: campaign.name,
-        subject: campaign.subject,
-        html: campaign.html_content,
-        audienceId,
-        previewText: campaign.preview_text ?? undefined,
-        scheduledAt: campaign.scheduled_at ?? undefined,
-      });
+    const emails = subscribers.map((s) => s.email);
 
-      await db.update(emailCampaigns)
-        .set({
-          status: "sent",
-          resend_broadcast_id: result.id,
-          sent_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
-        .where(eq(emailCampaigns.id, id))
-        .run();
-    } else {
-      // No audience configured — send directly to active subscribers
-      const subscribers = await db
-        .select({ email: newsletterSubscribers.email })
-        .from(newsletterSubscribers)
-        .where(eq(newsletterSubscribers.status, "active"))
-        .all();
+    await db.update(emailCampaigns)
+      .set({ recipient_count: emails.length, updated_at: new Date().toISOString() })
+      .where(eq(emailCampaigns.id, id))
+      .run();
 
-      const emails = subscribers.map((s) => s.email);
+    const result = await sendCampaignDirect(id, campaign.subject, campaign.html_content, emails);
 
-      await db.update(emailCampaigns)
-        .set({ recipient_count: emails.length, updated_at: new Date().toISOString() })
-        .where(eq(emailCampaigns.id, id))
-        .run();
-
-      const result = await sendCampaignDirect(campaign.subject, campaign.html_content, emails);
-
-      await db.update(emailCampaigns)
-        .set({
-          status: "sent",
-          sent_count: result.sent,
-          sent_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
-        .where(eq(emailCampaigns.id, id))
-        .run();
-    }
+    await db.update(emailCampaigns)
+      .set({
+        status: "sent",
+        sent_count: result.sent,
+        sent_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .where(eq(emailCampaigns.id, id))
+      .run();
 
     await logAdminAction(session.user.id, "campaign_sent", "campaign", id);
 

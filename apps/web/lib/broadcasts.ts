@@ -1,108 +1,55 @@
-import { getResend, FROM } from './email';
+import { sendEmail, FROM } from './email';
+import { applyCampaignTracking } from './email-tracking';
 import { getDb } from './db';
-import { newsletterSubscribers } from './schema';
-import { eq, and } from 'drizzle-orm';
-
-export interface BroadcastPayload {
-  name: string;
-  subject: string;
-  html: string;
-  audienceId: string;
-  previewText?: string;
-  scheduledAt?: string;
-}
-
-/**
- * Create and send a broadcast via Resend Broadcasts API.
- * Two-step: create the broadcast, then send it.
- */
-export async function sendBroadcast(payload: BroadcastPayload): Promise<{ id: string }> {
-  const resend = getResend();
-
-  // Step 1: Create the broadcast
-  const createResult = await resend.broadcasts.create({
-    from: FROM,
-    audienceId: payload.audienceId,
-    subject: payload.subject,
-    html: payload.html,
-    name: payload.name,
-    previewText: payload.previewText,
-  });
-
-  const broadcastId = createResult.data?.id;
-  if (!broadcastId) {
-    throw new Error('Failed to create broadcast: no ID returned');
-  }
-
-  // Step 2: Send it (optionally schedule)
-  await resend.broadcasts.send(broadcastId, payload.scheduledAt ? {
-    scheduledAt: payload.scheduledAt,
-  } : undefined);
-
-  return { id: broadcastId };
-}
-
-/**
- * Sync active local subscribers to a Resend Audience.
- * Upserts contacts so it's safe to call repeatedly.
- */
-export async function syncSubscribersToAudience(audienceId: string): Promise<{ synced: number }> {
-  const resend = getResend();
-  const db = getDb();
-
-  const subscribers = await db
-    .select({ email: newsletterSubscribers.email })
-    .from(newsletterSubscribers)
-    .where(
-      and(
-        eq(newsletterSubscribers.status, 'active'),
-      )
-    )
-    .all();
-
-  let synced = 0;
-  for (const sub of subscribers) {
-    try {
-      await resend.contacts.create({
-        audienceId,
-        email: sub.email,
-      });
-      synced++;
-    } catch {
-      // Contact may already exist — ignore
-    }
-  }
-
-  return { synced };
-}
+import { emailEvents } from './schema';
 
 /**
  * Send a campaign directly to subscribers via individual emails.
- * Used when no Resend Audience is configured (sends via Resend batch API).
+ *
+ * Cloudflare Email Service has no audience/broadcast or contact API, so a
+ * campaign is sent one email per recipient through the unified sendEmail()
+ * transport (Workers binding → REST API → console fallback). Sends are
+ * sequential to avoid rate-limit issues.
+ *
+ * Each recipient's HTML is personalized with open/click tracking (a unique
+ * signed token per recipient), and a `sent` event is recorded in email_events
+ * with the provider message id — the correlation key the delivery poller uses
+ * to attribute Delivered/Bounced later.
  */
 export async function sendCampaignDirect(
+  campaignId: string,
   subject: string,
   html: string,
   emails: string[],
 ): Promise<{ sent: number; failed: number }> {
-  const resend = getResend();
+  const db = getDb();
   let sent = 0;
   let failed = 0;
 
-  // Send in batches of 100 (Resend batch limit)
-  for (let i = 0; i < emails.length; i += 100) {
-    const batch = emails.slice(i, i + 100).map((to) => ({
-      from: FROM,
-      to,
-      subject,
-      html,
-    }));
+  for (const to of emails) {
     try {
-      await resend.batch.send(batch);
-      sent += batch.length;
+      const trackedHtml = applyCampaignTracking(html, { campaignId, email: to });
+      const { messageId } = await sendEmail({ from: FROM, to, subject, html: trackedHtml });
+
+      try {
+        await db
+          .insert(emailEvents)
+          .values({
+            email_id: messageId ?? null,
+            campaign_id: campaignId,
+            subscriber_email: to,
+            event_type: "sent",
+          })
+          .run();
+      } catch (logErr) {
+        // A logging failure must not count the send itself as failed.
+        console.error(`[broadcasts] failed to record sent event for ${to}:`, logErr);
+      }
+
+      sent++;
     } catch (err) {
-      console.error('[broadcasts] batch send failed:', err);
-      failed += batch.length;
+      console.error(`[broadcasts] send to ${to} failed:`, err);
+      failed++;
     }
   }
 

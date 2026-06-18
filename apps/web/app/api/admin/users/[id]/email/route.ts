@@ -5,7 +5,7 @@ import { requirePermission } from "@/lib/rbac";
 import { PERMISSIONS } from "@/lib/permissions";
 import { getDb } from "@/lib/db";
 import { user } from "@/lib/schema";
-import { getResend, FROM, APP_NAME } from "@/lib/email";
+import { sendEmail, FROM, APP_NAME } from "@/lib/email";
 import { queryFirst } from "@/lib/db-helpers";
 
 async function sendAdminEmail(to: string, subject: string, body: string): Promise<void> {
@@ -22,7 +22,7 @@ async function sendAdminEmail(to: string, subject: string, body: string): Promis
 </body>
 </html>`;
 
-  await getResend().emails.send({
+  await sendEmail({
     from: FROM,
     to,
     subject,

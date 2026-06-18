@@ -5,7 +5,7 @@ import { PERMISSIONS } from "@/lib/permissions";
 import { getDb } from "@/lib/db";
 import { emailCampaigns } from "@/lib/schema";
 import { queryFirst } from "@/lib/db-helpers";
-import { getResend, FROM } from "@/lib/email";
+import { sendEmail, FROM } from "@/lib/email";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -28,7 +28,7 @@ export async function POST(
   }
 
   try {
-    await getResend().emails.send({
+    await sendEmail({
       from: FROM,
       to: session.user.email,
       subject: `[Preview] ${campaign.subject}`,
