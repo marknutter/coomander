@@ -51,9 +51,9 @@ name = "coomander-agents"
 # worker's custom-domain route on the same host, so Cloudflare routes
 # `/agents/*` here and everything else to the app worker (`coomander`).
 # Uncomment to go live:
-# routes = [
-#   { pattern = "coomander.com/agents/*", zone_name = "coomander.com" },
-# ]
+routes = [
+  { pattern = "coomander.com/agents/*", zone_name = "coomander.com" },
+]
 
 [env.production.vars]
 # In prod the agent reaches the app worker over the WEB service binding below
