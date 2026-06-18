@@ -53,17 +53,12 @@ APP_URL = "https://coomander.com"
 # Cloudflare Email Service sender (migrated off Resend). Must be an address on a
 # domain onboarded at Cloudflare → Email → Email Sending.
 EMAIL_FROM = "Coomander <noreply@coomander.com>"
+# Cloudflare Email Sending REST API (transactional email to arbitrary recipients).
+# CF_EMAIL_API_TOKEN is a wrangler secret with the "Send Email" permission.
+CLOUDFLARE_ACCOUNT_ID = "1ed6d9117731a48060db43fabbf1a468"
 # Agents worker chat enabled in prod (#192) — WS streaming + schedule(); JSON chat is the fallback.
 FLAG_COOMANDER_AGENTS_CHAT = "true"
 
-# ── Cloudflare Email Service (send_email binding) ──────────────────────────
-# Tier-1 transport for lib/email.ts on Workers (zero-config; the binding
-# handles auth). Falls back to the REST API (CF_EMAIL_API_TOKEN +
-# CLOUDFLARE_ACCOUNT_ID) off-Workers, then console in dev. Operator setup:
-# onboard the sending domain at dash → Email → Email Sending (adds
-# SPF/DKIM/DMARC/MX) and verify destination addresses while in sandbox.
-[[send_email]]
-name = "EMAIL"
 
 # ── D1 (Cloudflare's serverless SQLite) ────────────────────────────────
 # `binding = "DB"` is what runtime code looks up via getCloudflareContext()

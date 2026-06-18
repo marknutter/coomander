@@ -15,7 +15,7 @@ import { eq } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { user as userT } from "@/lib/schema";
 import { auth } from "@/lib/auth";
-import { handleChatTurn, recentTurns } from "@/lib/coomander/coomanderChat";
+import { handleChatTurn, streamChatTurn, recentTurns } from "@/lib/coomander/coomanderChat";
 import { listMessages } from "@/lib/coomander/coomanderMessages";
 import { UnauthorizedError, BadRequestError, errorResponse } from "@/lib/errors";
 import { log } from "@/lib/logger";
@@ -58,6 +58,45 @@ export async function POST(request: Request) {
     const body = (await request.json().catch(() => ({}))) as { message?: unknown };
     const message = typeof body.message === "string" ? body.message.trim() : "";
     if (!message) throw new BadRequestError("message is required");
+
+    // Content-negotiate: SSE token streaming for clients that ask for it (the
+    // mobile XHR-SSE path, mirroring geology's /api/chat), JSON otherwise (the
+    // web chat depends on the byte-for-byte `{ reply, acted }` shape).
+    const wantsStream = request.headers.get("accept")?.includes("text/event-stream");
+    if (wantsStream) {
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream({
+        start(controller) {
+          streamChatTurn(userId, message, {
+            onText(text) {
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ text })}\n\n`));
+            },
+            onDone(fullText, acted) {
+              controller.enqueue(
+                encoder.encode(`data: ${JSON.stringify({ done: true, fullText, acted })}\n\n`),
+              );
+              controller.close();
+            },
+            onError(error) {
+              log.error("POST /api/coomander/chat stream failed", { error });
+              controller.enqueue(
+                encoder.encode(
+                  `data: ${JSON.stringify({ error: "Something went wrong. Please try again." })}\n\n`,
+                ),
+              );
+              controller.close();
+            },
+          });
+        },
+      });
+      return new Response(stream, {
+        headers: {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          Connection: "keep-alive",
+        },
+      });
+    }
 
     const result = await handleChatTurn(userId, message);
     return NextResponse.json({ reply: result.reply, acted: result.acted });

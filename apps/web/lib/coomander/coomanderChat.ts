@@ -159,6 +159,114 @@ export async function runCoomanderTool(
   return { action: res.acted ? name : null, note: res.reply };
 }
 
+/**
+ * Streaming sibling of `handleChatTurn` (SSE token streaming, mirrors geology's
+ * `/api/chat`). Builds the SAME inputs as `handleChatTurn` (loadContext,
+ * chatSystemPrompt, recent turns + the new user message, the Coomander tools),
+ * but uses the Anthropic streaming helper so the route can emit token deltas.
+ *
+ * Text vs tool paths:
+ * - If the model streams TEXT, those deltas are the reply. `onText` fires per
+ *   delta during streaming; `fullText` is the concatenation.
+ * - If the final message contains a `tool_use` block, the streamed text was
+ *   empty/partial, so we run resolveToolUse + executeAction (the SAME path as
+ *   handleChatTurn) and emit the resulting note via `onText` so the client
+ *   still shows it. `fullText` becomes that note.
+ *
+ * Persistence mirrors handleChatTurn exactly: inbound user message first (with
+ * its toolCall when one fired), then the outbound reply — both best-effort.
+ * This is the SAME no-TTL thread as Telegram and the JSON path, so we persist
+ * once here and the route does NOT persist again (no double-write).
+ */
+export interface StreamChatTurnCallbacks {
+  onText: (delta: string) => void;
+  onDone: (fullText: string, acted: boolean) => void;
+  onError: (error: unknown) => void;
+}
+
+export async function streamChatTurn(
+  userId: string,
+  text: string,
+  cb: StreamChatTurnCallbacks,
+): Promise<void> {
+  try {
+    const settings = await getCoomanderSettings(userId);
+
+    // Same grounding context for tool execution as handleChatTurn.
+    const inboundCtx = await loadContext(userId);
+
+    // Same fully rendered prompt (recent turns are baked into the system prompt,
+    // matching handleChatTurn — the new user message is the single user turn).
+    const system = await chatSystemPrompt(userId);
+
+    const client = new Anthropic();
+    const stream = client.messages.stream({
+      model: MODEL,
+      max_tokens: COOMANDER_CHAT_MAX_TOKENS,
+      system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
+      tools: tools(),
+      tool_choice: { type: "auto" },
+      messages: [{ role: "user", content: text }],
+    });
+
+    // Pipe text deltas straight through to the client.
+    stream.on("text", (delta) => {
+      if (delta) cb.onText(delta);
+    });
+
+    const final = await stream.finalMessage();
+    await logCoomanderUsage(
+      userId,
+      "inbound",
+      MODEL,
+      final.usage?.input_tokens,
+      final.usage?.output_tokens,
+    );
+
+    const toolBlock = final.content.find(
+      (b): b is Anthropic.ToolUseBlock => b.type === "tool_use",
+    );
+
+    let reply: string;
+    let acted = false;
+    let toolCall: { toolName: string; input: Record<string, unknown> } | null = null;
+
+    if (toolBlock) {
+      // Tool path: the streamed text was empty/partial. Run the SAME executor
+      // path handleChatTurn uses; the note becomes the reply and we emit it so
+      // the client shows it (streamed deltas alone wouldn't include it).
+      toolCall = { toolName: toolBlock.name, input: (toolBlock.input ?? {}) as Record<string, unknown> };
+      const action = resolveToolUse(toolBlock.name, toolCall.input, inboundCtx);
+      const res = await executeAction(userId, action, inboundCtx);
+      reply = res.reply;
+      acted = res.acted;
+      if (reply) cb.onText(reply);
+    } else {
+      // Text path: the streamed deltas already are the reply.
+      reply =
+        final.content
+          .filter((b): b is Anthropic.TextBlock => b.type === "text")
+          .map((b) => b.text)
+          .join("")
+          .trim() || "Got it.";
+    }
+
+    // Persist both sides to the shared thread (best-effort), inbound first —
+    // identical to handleChatTurn so the JSON and SSE paths write the same rows.
+    await appendMessage(userId, "inbound", text, {
+      personaMode: settings.personaMode,
+      toolCall: toolCall ?? undefined,
+    }).catch(() => {});
+    await appendMessage(userId, "outbound", reply, {
+      personaMode: settings.personaMode,
+    }).catch(() => {});
+
+    cb.onDone(reply, acted);
+  } catch (error) {
+    cb.onError(error);
+  }
+}
+
 export async function handleChatTurn(
   userId: string,
   text: string,
