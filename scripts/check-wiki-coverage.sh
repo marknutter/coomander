@@ -6,8 +6,8 @@
 
 set -euo pipefail
 
-WIKI_DIR="node/content/docs/dev"
-GUIDE_DIR="node/content/docs/guide"
+WIKI_DIR="apps/web/content/docs/dev"
+GUIDE_DIR="apps/web/content/docs/guide"
 
 # Only run if this project has a dev wiki
 if [ ! -d "$WIKI_DIR" ]; then
@@ -21,7 +21,7 @@ if [ -z "$CHANGED" ]; then
 fi
 
 # Skip if the commit only touched docs/wiki files
-NON_DOC_CHANGES=$(echo "$CHANGED" | grep -v "^node/content/docs/" | grep -v "^AGENTS.md" | grep -v "^CLAUDE.md" || true)
+NON_DOC_CHANGES=$(echo "$CHANGED" | grep -v "^apps/web/content/docs/" | grep -v "^AGENTS.md" | grep -v "^CLAUDE.md" || true)
 if [ -z "$NON_DOC_CHANGES" ]; then
   exit 0
 fi

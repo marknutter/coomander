@@ -39,28 +39,33 @@ services:
   # container serves both. Full dev mode (hot reload, HMR) on both paths.
   app-dev:
     build:
-      context: ./node
-      dockerfile: Dockerfile.dev
+      context: .
+      dockerfile: apps/web/Dockerfile.dev
     container_name: coomander-dev
     network_mode: service:caddy-dev
     depends_on:
       - caddy-dev
     volumes:
-      - ./node:/app
-      # Named volume so npm-installed deps survive `docker compose down/up`.
+      - ./apps/web:/app/apps/web
+      - ./packages/core:/app/packages/core
+      # tsconfig.base.json is extended by apps/web/tsconfig.json; Turbopack 500s without it.
+      - ./tsconfig.base.json:/app/tsconfig.base.json:ro
+      # Named volumes so npm-installed deps survive `docker compose down/up`.
       # Populated from the image on first create. To refresh after a
       # package.json change: `docker compose run --rm app-dev npm install`.
-      - node_modules:/app/node_modules
-      - ./node/data:/app/data
-    env_file: ./node/.env.local
+      - root_node_modules:/app/node_modules
+      - web_node_modules:/app/apps/web/node_modules
+      - ./apps/web/data:/app/apps/web/data
+    env_file: ./apps/web/.env.local
     environment:
       NODE_ENV: development
-      DATABASE_PATH: /app/data/coomander.db
+      DATABASE_PATH: /app/apps/web/data/coomander.db
       BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:3005}
       APP_URL: ${APP_URL:-http://localhost:3005}
       WATCHPACK_POLLING: "true"
     restart: unless-stopped
 
 volumes:
-  node_modules:
+  root_node_modules:
+  web_node_modules:
   caddy_state:

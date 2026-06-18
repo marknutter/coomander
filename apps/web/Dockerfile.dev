@@ -1,0 +1,24 @@
+# Dev image for the monorepo. The build context is the REPO ROOT (see
+# docker-compose.yml) so the workspace lockfile + sibling workspace manifests
+# are visible to `npm ci`, which links @coomander/core and hoists deps to
+# /app/node_modules.
+FROM node:22-alpine
+
+RUN apk add --no-cache libc6-compat python3 make g++
+
+WORKDIR /app
+
+# Workspace manifests first for layer caching.
+COPY package.json package-lock.json* ./
+COPY apps/web/package.json ./apps/web/package.json
+COPY packages/core/package.json ./packages/core/package.json
+# fumadocs-mdx postinstall runs in the apps/web workspace during `npm ci` and
+# needs source.config.ts + content/ present.
+COPY apps/web/source.config.ts ./apps/web/source.config.ts
+COPY apps/web/content ./apps/web/content
+
+RUN npm ci
+
+EXPOSE 3000
+WORKDIR /app/apps/web
+CMD ["npm", "run", "dev"]
