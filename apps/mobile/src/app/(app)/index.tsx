@@ -14,9 +14,9 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather, Ionicons } from "@expo/vector-icons";
 import * as Speech from "expo-speech";
+import { useRouter } from "expo-router";
 
 import { getThread, streamMessage, type CoomanderMessage } from "@/lib/api";
-import { authClient } from "@/lib/auth-client";
 import { useTheme } from "@/lib/theme";
 import { Screen } from "@/components/screen";
 import { ApiError } from "@coomander/core";
@@ -156,6 +156,7 @@ function tmpId(prefix: string): string {
 export default function CoomanderChatScreen() {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const flatListRef = useRef<FlatList<UIMessage>>(null);
 
   const [input, setInput] = useState("");
@@ -268,12 +269,6 @@ export default function CoomanderChatScreen() {
     }
   }
 
-  // ── Sign out ──────────────────────────────────────────────────────────
-  function signOut() {
-    Speech.stop();
-    authClient.signOut();
-  }
-
   // ── TTS (expo-speech, ported from geology) ────────────────────────────
   function speakMessage(id: string, content: string) {
     if (speakingId === id) {
@@ -346,12 +341,12 @@ export default function CoomanderChatScreen() {
           <Text style={[styles.brandName, { color: colors.foreground }]}>Coomander</Text>
         </View>
         <Pressable
-          onPress={signOut}
+          onPress={() => router.push("/settings")}
           hitSlop={8}
           accessibilityRole="button"
-          accessibilityLabel="Sign out"
+          accessibilityLabel="Settings"
         >
-          <Feather name="log-out" size={20} color={colors.mutedForeground} />
+          <Feather name="settings" size={20} color={colors.mutedForeground} />
         </Pressable>
       </View>
 
