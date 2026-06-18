@@ -47,3 +47,53 @@ export async function apiFetch<T = unknown>(
 
   return data as T;
 }
+
+// ---------------------------------------------------------------------------
+// Coomander agent chat
+// ---------------------------------------------------------------------------
+
+/** A single message in the unified Coomander thread (web + Telegram + phone). */
+export interface CoomanderMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  createdAt?: number;
+}
+
+/** Shape of `GET /api/coomander/chat`. */
+export interface CoomanderThread {
+  /** Whether Coomander ops is enabled for the signed-in user. */
+  enabled: boolean;
+  messages: CoomanderMessage[];
+}
+
+/** Shape of `POST /api/coomander/chat`. */
+export interface CoomanderReply {
+  reply: string;
+  /** True when Coomander took a domain action (tool-use) this turn. */
+  acted: boolean;
+}
+
+/**
+ * Load the unified Coomander thread on mount. This is the SAME
+ * `coomander_message_log` the web app and Telegram use, so web + phone are one
+ * conversation. Auth (the Better Auth session cookie) is attached by
+ * `apiFetch`.
+ */
+export function getThread(): Promise<CoomanderThread> {
+  return apiFetch<CoomanderThread>("/api/coomander/chat");
+}
+
+/**
+ * Send one chat turn. Coomander either converses or takes a domain action,
+ * then persists both sides. Unlike geology's `/api/chat` SSE stream, this is a
+ * plain request/response JSON call — there is no token-level streaming yet, so
+ * callers show a "thinking…" indicator while the POST is in flight and append
+ * the returned `reply` (or re-`getThread()`) when it resolves.
+ */
+export function sendMessage(message: string): Promise<CoomanderReply> {
+  return apiFetch<CoomanderReply>("/api/coomander/chat", {
+    method: "POST",
+    body: JSON.stringify({ message }),
+  });
+}
