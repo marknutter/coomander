@@ -92,6 +92,28 @@ bucket_name = "coomander-storage"
 binding = "VIDEO_PROCESSOR"
 service = "coomander-video-processor"
 
+# ── Durable Object cleanup (prod outage fix, 2026-06-18) ───────────────
+# A prior out-of-band deploy registered an `AppAgent` Durable Object on THIS
+# (web) worker with no local class — AppAgent lives only in the coomander-agents
+# worker. The orphaned binding (script_name unset → expects a LOCAL class) made
+# the worker fail to instantiate on every request, returning a site-wide 401.
+# DO migrations are sticky: simply omitting the binding makes `wrangler deploy`
+# refuse with "class removed but no migration"; the class must be explicitly
+# deleted. The web app reaches AppAgent cross-worker via the service binding /
+# /agents/* route, never as a local DO, so deleting it here is correct.
+# The full chain is listed (canonical Cloudflare pattern): v1 created the orphan
+# AppAgent class on this worker, v2 deletes it. The remote worker is already at
+# v1, so only v2 is actually applied; listing v1 lets the local miniflare
+# validator (OpenNext runs getPlatformProxy at deploy) see AppAgent as a
+# created-then-deleted class instead of erroring on a "non-existent class".
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["AppAgent"]
+
+[[migrations]]
+tag = "v2"
+deleted_classes = ["AppAgent"]
+
 # ── Environment-specific overrides ─────────────────────────────────────
 # Production deploy will use `wrangler deploy --env production` and override
 # the placeholder IDs above. Keeping the top-level entries valid so local
