@@ -383,6 +383,45 @@ describe("buildDeterministicReview — graceful empty inputs", () => {
   });
 });
 
+describe("buildDeterministicReview — local timezone bucketing (#183)", () => {
+  it("buckets a boundary drop to the creator's LOCAL day, not UTC", () => {
+    // weekEnding 2026-06-21 → weekStart 2026-06-15 (6 days before).
+    const weekEnding = "2026-06-21";
+    // 2026-06-15 03:00 UTC. In UTC this is 2026-06-15 (== weekStart, IN week).
+    // In America/Chicago (CDT, UTC-5) it is 2026-06-14 22:00 → 2026-06-14,
+    // the day BEFORE weekStart, so it falls OUTSIDE the week.
+    const boundaryTs = Math.floor(Date.parse("2026-06-15T03:00:00Z") / 1000);
+    const inputsFor = (tz: string) =>
+      buildInputs({
+        tz,
+        weekEnding,
+        weekDrops: [
+          drop({ id: "d1", dropped_at: boundaryTs, platform: "ig" }),
+        ] as unknown as never,
+        allShippedDropDates: [],
+        content: [],
+        procurement: [],
+        badDayCount: 0,
+      });
+
+    const chicago = buildDeterministicReview(inputsFor("America/Chicago"));
+    const utc = buildDeterministicReview(inputsFor("UTC"));
+
+    // Chicago: drop lands on 2026-06-14 (before weekStart) → 0 active in-week
+    // days → all 7 days are zero-drop days.
+    expect(chicago.consistency.days_with_zero_drops).toBe(7);
+    // UTC: drop lands on 2026-06-15 (== weekStart, in week) → 1 active day →
+    // 6 zero-drop days.
+    expect(utc.consistency.days_with_zero_drops).toBe(6);
+
+    // The two bucketings must differ — this is the regression guard: if
+    // bucketing reverts to UTC for both, these would be equal.
+    expect(chicago.consistency.days_with_zero_drops).not.toBe(
+      utc.consistency.days_with_zero_drops,
+    );
+  });
+});
+
 // ── renderReviewMessage ──────────────────────────────────────────────────────
 
 describe("renderReviewMessage", () => {

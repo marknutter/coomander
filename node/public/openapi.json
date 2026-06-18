@@ -1574,7 +1574,7 @@
                           "ok": {
                             "type": "boolean"
                           },
-                          "error": {
+                          "weekEnding": {
                             "oneOf": [
                               {
                                 "type": "object"
@@ -1583,6 +1583,9 @@
                                 "type": "object"
                               }
                             ]
+                          },
+                          "error": {
+                            "type": "object"
                           }
                         },
                         "required": [
