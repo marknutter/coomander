@@ -19,6 +19,7 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test -w apps/web",
     "test:agents": "npm run test -w apps/agents",
+    "test:mobile": "npm run test -w apps/mobile",
     "test:e2e": "npm run test:e2e -w apps/web",
     "db:migrate": "npm run db:migrate -w apps/web",
     "db:rollback": "npm run db:rollback -w apps/web",
