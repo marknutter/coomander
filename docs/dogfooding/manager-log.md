@@ -110,3 +110,7 @@ Fired a manual weekly review for Maddie (weekEnding 2026-06-21) → delivered to
 ## Session 5b (2026-06-17) — ✅ next_week render bug fixed
 
 `normalizeFocus()` (PR #187, worker e6731e64) coerces next_week_focus (array or JSON-array-literal string) to clean prose, at the build layer + page render. Re-eyeballed the full-review page logged in as Maddie: "Next week:" now renders as a clean sentence (no brackets) — the already-stored 2026-06-21 review displays clean via render-time coercion. +5 unit tests; typecheck + 485 tests + build:cf green.
+
+## Session 6 (2026-06-17) — ✅ weekly-review local timezone (closes #183 Phase 1 tail)
+
+Last deferred timezone piece done (PR #188, worker 8356e8a0): the weekly review buckets drops/procurement/week-window by the creator's local day, and the default weekEnding is the most-recent Sunday in their tz. Re-fired on prod → 200, sent + persisted. +1 tz-bucketing test (chicago 7 vs utc 6 zero-drop days); typecheck + 486 tests + build:cf green. Phase 1 fully complete; only #183 Phase 2 (local ping *times*) remains.
