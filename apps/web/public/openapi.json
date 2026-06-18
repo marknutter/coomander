@@ -1932,6 +1932,57 @@
         }
       }
     },
+    "/email/click": {
+      "get": {
+        "operationId": "get-email-click",
+        "summary": "Click-tracking redirect. Campaign links are rewritten to point here with a",
+        "description": "",
+        "tags": [
+          "Email"
+        ],
+        "parameters": [],
+        "responses": {
+          "302": {
+            "description": "Successful response"
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
+    "/email/open": {
+      "get": {
+        "operationId": "get-email-open",
+        "summary": "Open-tracking pixel. Campaign HTML embeds a 1×1 image pointing here with a",
+        "description": "",
+        "tags": [
+          "Email"
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "t",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "example": "example"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
     "/flags": {
       "get": {
         "operationId": "get-flags",
@@ -2720,6 +2771,9 @@
     },
     {
       "name": "Coomander"
+    },
+    {
+      "name": "Email"
     },
     {
       "name": "Flags"
