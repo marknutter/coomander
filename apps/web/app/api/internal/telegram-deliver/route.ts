@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { user as userT } from "@/lib/schema";
 import { sendTelegram } from "@/lib/coomander/telegram";
+import { timingSafeEqualStr } from "@/lib/internal-auth";
 import { log } from "@/lib/logger";
 
 export const dynamic = "force-dynamic";
@@ -35,7 +36,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "internal endpoint disabled" }, { status: 503 });
   }
   const presented = request.headers.get("x-agents-internal-secret");
-  if (!presented || presented !== secret) {
+  if (!presented || !timingSafeEqualStr(presented, secret)) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 

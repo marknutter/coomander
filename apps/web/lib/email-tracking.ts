@@ -24,11 +24,12 @@ export interface TrackingContext {
 }
 
 function trackingSecret(): string {
-  return (
-    process.env.EMAIL_TRACKING_SECRET ||
-    process.env.BETTER_AUTH_SECRET ||
-    "dev-insecure-email-tracking-secret"
-  );
+  const s = process.env.EMAIL_TRACKING_SECRET || process.env.BETTER_AUTH_SECRET;
+  if (s) return s;
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("EMAIL_TRACKING_SECRET or BETTER_AUTH_SECRET must be set in production");
+  }
+  return "dev-insecure-email-tracking-secret";
 }
 
 /** Sign `{campaignId, email, url?}` into a `<payload>.<sig>` token (base64url). */
