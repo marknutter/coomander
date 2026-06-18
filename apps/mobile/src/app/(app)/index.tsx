@@ -15,7 +15,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather, Ionicons } from "@expo/vector-icons";
 import * as Speech from "expo-speech";
 
-import { getThread, sendMessage, type CoomanderMessage } from "@/lib/api";
+import { getThread, streamMessage, type CoomanderMessage } from "@/lib/api";
 import { authClient } from "@/lib/auth-client";
 import { useTheme } from "@/lib/theme";
 import { Screen } from "@/components/screen";
@@ -202,7 +202,7 @@ export default function CoomanderChatScreen() {
     }
   }, [messages.length, thinking]);
 
-  // ── Send one chat turn (request/response, no streaming) ───────────────
+  // ── Send one chat turn (SSE token streaming via XHR) ──────────────────
   async function handleSend() {
     const text = input.trim();
     if (!text || thinking) return;
@@ -211,21 +211,56 @@ export default function CoomanderChatScreen() {
     setInput("");
     setError(null);
 
-    // Optimistic user bubble.
+    // Optimistic user bubble + an empty assistant bubble we stream tokens into.
     const userMsg: UIMessage = { id: tmpId("u"), role: "user", content: text };
-    setMessages((prev) => [...prev, userMsg]);
+    const assistantId = tmpId("a");
+    setMessages((prev) => [
+      ...prev,
+      userMsg,
+      { id: assistantId, role: "assistant", content: "" },
+    ]);
     setThinking(true);
 
+    let sawText = false;
     try {
-      const { reply } = await sendMessage(text);
-      setMessages((prev) => [
-        ...prev,
-        { id: tmpId("a"), role: "assistant", content: reply },
-      ]);
+      const fullText = await streamMessage(text, {
+        onText(accumulated) {
+          sawText = true;
+          // First delta means the model is producing — drop the "Thinking…" bar.
+          setThinking(false);
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantId ? { ...m, content: accumulated } : m,
+            ),
+          );
+        },
+        onDone(final) {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantId ? { ...m, content: final } : m,
+            ),
+          );
+        },
+        onError(message) {
+          setError(message);
+        },
+      });
+
+      // If the stream errored before any text, roll back the empty bubbles and
+      // restore the user's text so they can retry (mirrors the old JSON path).
+      // (Tap-to-speak via the bubble's volume icon is preserved unchanged; we
+      // don't auto-speak here since the original screen never did.)
+      if (!fullText && !sawText) {
+        setMessages((prev) =>
+          prev.filter((m) => m.id !== userMsg.id && m.id !== assistantId),
+        );
+        setInput(text);
+      }
     } catch (e) {
-      // Surface an inline error and roll the optimistic message back so the
-      // user can retry their text.
-      setMessages((prev) => prev.filter((m) => m.id !== userMsg.id));
+      // Transport failure: roll back the optimistic bubbles and restore input.
+      setMessages((prev) =>
+        prev.filter((m) => m.id !== userMsg.id && m.id !== assistantId),
+      );
       setInput(text);
       setError(e instanceof ApiError ? e.message : "Message failed to send.");
     } finally {
