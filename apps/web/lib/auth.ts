@@ -91,6 +91,17 @@ function buildAuth(): AuthInstance {
     trustedOrigins: (() => {
       const origins: string[] = [];
       if (process.env.BETTER_AUTH_URL) origins.push(process.env.BETTER_AUTH_URL);
+      // Mobile app (apps/mobile, Expo) origins. The mobile auth client has no
+      // expo() server plugin counterpart; it injects `Origin: EXPO_PUBLIC_API_URL`
+      // on every request to satisfy Better Auth's CSRF origin check, so the
+      // tailnet (dev) and prod API URLs it can point at must be trusted here.
+      // The `coomander://` scheme is the app's deep-link scheme used for OAuth
+      // callbacks. Trusted in all environments (mobile hits both dev and prod).
+      origins.push(
+        "coomander://",
+        "https://coomander.gate-cardassian.ts.net",
+        "https://coomander.com",
+      );
       // In development, trust common localhost variants (0.0.0.0, 127.0.0.1)
       // so Docker and direct access both work. Also trust any Tailscale
       // tailnet hostname (*.ts.net) on any port so you can hit the dev
