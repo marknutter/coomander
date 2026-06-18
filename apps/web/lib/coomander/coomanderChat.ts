@@ -23,6 +23,14 @@ import { logCoomanderUsage } from "./usage";
 
 const MODEL = process.env.COOMANDER_AGENT_MODEL || process.env.CHAT_MODEL || "claude-sonnet-4-6";
 
+/**
+ * Public model/token settings, exported so the agents Worker contract route
+ * (GET /api/coomander/agent-context, #192) can report the SAME values the
+ * in-app POST path uses — keeping the WebSocket and JSON chat paths identical.
+ */
+export const COOMANDER_CHAT_MODEL = MODEL;
+export const COOMANDER_CHAT_MAX_TOKENS = 600;
+
 export type ChatRole = "user" | "assistant";
 
 export interface ChatTurn {
@@ -92,40 +100,77 @@ export interface HandleChatTurnOptions {
  * Never throws into the route's hot path beyond the model call; the route
  * wraps it.
  */
+/**
+ * The in-app web-chat surface guidance appended to the system prompt (#172):
+ * the web client renders markdown links to /app/* as tappable buttons, so
+ * Coomander can deep-link the creator to the detailed surfaces behind it.
+ * (Telegram uses the bare prompt — these links are no-ops there.)
+ */
+const WEB_SURFACES = [
+  "You are in the in-app web chat. When it helps, deep-link the creator to a detailed surface using a markdown link — they render as tappable buttons:",
+  "- Cadence (pillars, beats, and the latest weekly review): [Open Cadence](/app/cadence)",
+  "- Insights (Instagram analytics): [Open Insights](/app/insights)",
+  "Don't link on every turn — only when pointing at the right view is the natural next step.",
+].join("\n");
+
+/**
+ * Build the fully rendered in-app chat system prompt for a user — the SAME
+ * prompt the POST path uses, exported so the agents Worker contract route
+ * (GET /api/coomander/agent-context, #192) can serve it to the WebSocket chat
+ * loop. lib/coomander/coomanderChat.ts stays the single source of truth.
+ */
+export async function chatSystemPrompt(userId: string): Promise<string> {
+  const settings = await getCoomanderSettings(userId);
+  const date = await userToday(userId);
+  const [model, turns] = await Promise.all([
+    getTodayModel(userId, date),
+    recentTurns(userId, 10),
+  ]);
+  const stateCtx = renderContext(model, await daysSinceStart(userId, date));
+  const history = turns.length
+    ? `\n\nRecent conversation (oldest first):\n${turns.map((t) => `${t.role}: ${t.content}`).join("\n")}`
+    : "";
+  return `${coomanderSystem(settings.personaMode)}\n\n${WEB_SURFACES}\n\nCurrent ops state:\n${stateCtx}${history}`;
+}
+
+/**
+ * The Coomander domain tool schemas (Anthropic.Tool[]), exported for the agents
+ * Worker contract route. Same vocabulary the classifier + in-app chat use.
+ */
+export function chatTools(): Anthropic.Tool[] {
+  return tools();
+}
+
+/**
+ * Execute one Coomander domain tool call for the agents Worker
+ * (POST /api/coomander/agent-tool, #192). Runs through the EXACT
+ * resolveToolUse + executeAction path handleChatTurn uses, returning the
+ * `{ action, note }` shape the Worker's tool proxy expects: `note` becomes the
+ * tool_result the model sees; `action` lands in the assistant turn's meta.
+ */
+export async function runCoomanderTool(
+  userId: string,
+  name: string,
+  input: Record<string, unknown>,
+): Promise<{ action: string | null; note: string }> {
+  const inboundCtx = await loadContext(userId);
+  const resolved = resolveToolUse(name, input, inboundCtx);
+  const res = await executeAction(userId, resolved, inboundCtx);
+  return { action: res.acted ? name : null, note: res.reply };
+}
+
 export async function handleChatTurn(
   userId: string,
   text: string,
   opts: HandleChatTurnOptions = {},
 ): Promise<ChatTurnResult> {
   const settings = await getCoomanderSettings(userId);
-  const date = await userToday(userId);
 
-  // Build grounding context: live ops state + recent conversation. We inject the
-  // thread into the system prompt (rather than as message turns) to avoid
-  // role-alternation constraints, and send only the new user message.
-  const [model, turns] = await Promise.all([
-    getTodayModel(userId, date),
-    recentTurns(userId, 10),
-  ]);
-  const stateCtx = renderContext(model, await daysSinceStart(userId, date));
+  // Grounding context for tool execution (live ops state + beats/content).
   const inboundCtx = await loadContext(userId);
 
-  const history = turns.length
-    ? `\n\nRecent conversation (oldest first):\n${turns.map((t) => `${t.role}: ${t.content}`).join("\n")}`
-    : "";
-
-  // In-app only (#172): the web client renders markdown links to /app/* as
-  // tappable buttons, so Coomander can deep-link the creator to the detailed
-  // surfaces behind it. (Telegram uses the bare prompt — these links are no-ops
-  // there.) Keep links sparing: offer one when it genuinely helps.
-  const webSurfaces = [
-    "You are in the in-app web chat. When it helps, deep-link the creator to a detailed surface using a markdown link — they render as tappable buttons:",
-    "- Cadence (pillars, beats, and the latest weekly review): [Open Cadence](/app/cadence)",
-    "- Insights (Instagram analytics): [Open Insights](/app/insights)",
-    "Don't link on every turn — only when pointing at the right view is the natural next step.",
-  ].join("\n");
-
-  const system = `${coomanderSystem(settings.personaMode)}\n\n${webSurfaces}\n\nCurrent ops state:\n${stateCtx}${history}`;
+  // Same fully rendered prompt the WebSocket path gets via agent-context.
+  const system = await chatSystemPrompt(userId);
 
   const runModel = opts.model ?? defaultChatModel;
   const msg = await runModel(system, text);

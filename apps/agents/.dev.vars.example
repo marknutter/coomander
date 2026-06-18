@@ -1,0 +1,21 @@
+# Local dev secrets for the agents Worker. `wrangler dev` auto-loads .dev.vars.
+# Copy to `.dev.vars` and fill in. In production set these with
+# `wrangler secret put <NAME> --env production` instead.
+#
+# In Docker dev (docker-compose), the agents-dev service also reads
+# apps/web/.env.local via scripts/dev.sh. Use .dev.vars when running
+# `npm run dev -w apps/agents` directly.
+
+# Anthropic key for the WebSocket chat loop (same key as apps/web/.env.local).
+ANTHROPIC_API_KEY=sk-ant-...
+
+# Optional — override the chat model / token cap. Defaults mirror
+# apps/web/lib/coomander/coomanderChat.ts (claude-sonnet-4-6, 600 tokens); these
+# are only fallbacks — the live model/prompt come from
+# /api/coomander/agent-context.
+# CHAT_MODEL=claude-sonnet-4-6
+# CHAT_MAX_TOKENS=600
+
+# Shared secret for server-to-server agent → web calls (scheduled wakes).
+# MUST match AGENTS_INTERNAL_SECRET in apps/web/.env.local.
+AGENTS_INTERNAL_SECRET=dev-agents-internal-secret-change-me
