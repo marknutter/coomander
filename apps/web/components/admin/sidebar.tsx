@@ -15,6 +15,7 @@ import {
   BookOpen,
   Megaphone,
   Sparkles,
+  Bot,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 
@@ -24,6 +25,7 @@ const navItems = [
   { href: "/admin/database", label: "Database", icon: Database },
   { href: "/admin/analytics", label: "Analytics", icon: BarChart3 },
   { href: "/admin/ai-usage", label: "AI Usage", icon: Sparkles },
+  { href: "/admin/ai-models", label: "AI Models", icon: Bot },
   { href: "/admin/crm", label: "CRM", icon: Mail },
   { href: "/admin/campaigns", label: "Campaigns", icon: Megaphone },
   { href: "/admin/roles", label: "Roles", icon: Shield },

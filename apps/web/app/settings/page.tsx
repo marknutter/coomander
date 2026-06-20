@@ -37,6 +37,7 @@ import { Modal } from "@/components/ui/modal";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
+import { AiModelPreference } from "@/components/settings/ai-model-preference";
 import { toast } from "@/lib/use-toast";
 
 // ─── Provider label helper ──────────────────────────────────────────────────
@@ -611,6 +612,9 @@ export default function SettingsPage() {
             <ThemeToggle />
           </div>
         </Card>
+
+        {/* ── AI Chat Model ─────────────────────────────────────────────── */}
+        <AiModelPreference />
 
         {/* ── Subscription & Billing ────────────────────────────────────── */}
         <Card icon={<CreditCard className="w-4 h-4 text-primary" />} title="Subscription &amp; Billing">

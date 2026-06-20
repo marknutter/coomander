@@ -12,6 +12,8 @@ import {
 } from "@/lib/coomander/coomanderChat";
 import { errorResponse, UnauthorizedError } from "@/lib/errors";
 import { log } from "@/lib/logger";
+import { resolveActiveModel } from "@/lib/active-model";
+import { getModel } from "@/lib/model-catalog";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -48,15 +50,36 @@ export async function GET(request: Request) {
       chatSystemPrompt(userId),
     ]);
 
+    // Resolve the active model from the catalog (admin default + per-user
+    // override, #203 Phase B) so the switcher drives the live agent. The agent
+    // tool-gates / multimodal-gates on the capability flags. If resolution
+    // throws (DB hiccup, etc.) fall back to the static constant so the agent
+    // never loses its model.
+    let modelEntry = getModel(COOMANDER_CHAT_MODEL);
+    try {
+      modelEntry = await resolveActiveModel({ userId });
+    } catch (resolveErr) {
+      log.warn("[agent-context] active-model resolution failed; using static fallback", {
+        userId,
+        fallback: COOMANDER_CHAT_MODEL,
+        error: resolveErr instanceof Error ? resolveErr.message : String(resolveErr),
+      });
+    }
+
     // chatTools() returns Anthropic.Tool[]; the Worker consumes the same
     // {name, description, input_schema} shape.
     return NextResponse.json({
       entitled,
       today,
-      model: COOMANDER_CHAT_MODEL,
+      model: modelEntry?.id ?? COOMANDER_CHAT_MODEL,
       maxTokens: COOMANDER_CHAT_MAX_TOKENS,
       systemPrompt,
       tools: chatTools(),
+      // Capability flags so the agent can gate tools / multimodal per model.
+      supportsTools: modelEntry?.supportsTools ?? true,
+      supportsImages: modelEntry?.supportsImages ?? true,
+      tier: modelEntry?.tier,
+      provider: modelEntry?.provider,
     });
   } catch (error) {
     log.error("GET /api/coomander/agent-context failed", { error });
