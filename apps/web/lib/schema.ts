@@ -60,6 +60,8 @@ export const contentStates = mod.contentStates;
 export const drops = mod.drops;
 export const procurementItems = mod.procurementItems;
 export const weeklyReviews = mod.weeklyReviews;
+export const appSettings = mod.appSettings;
+export const providerKeys = mod.providerKeys;
 
 export type {
   Platform,
@@ -99,4 +101,8 @@ export type {
   NewProcurementItem,
   WeeklyReviewRow,
   NewWeeklyReviewRow,
+  AppSetting,
+  NewAppSetting,
+  ProviderKeyRow,
+  NewProviderKeyRow,
 } from "./schema.sqlite";

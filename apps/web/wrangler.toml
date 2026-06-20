@@ -58,6 +58,20 @@ EMAIL_FROM = "Coomander <noreply@coomander.com>"
 CLOUDFLARE_ACCOUNT_ID = "1ed6d9117731a48060db43fabbf1a468"
 # Agents worker chat enabled in prod (#192) — WS streaming + schedule(); JSON chat is the fallback.
 FLAG_COOMANDER_AGENTS_CHAT = "true"
+# ── AI Gateway (#203) ──────────────────────────────────────────────────
+# Route AI through a Cloudflare AI Gateway (e.g. "coomander-gateway") for
+# usage/cost analytics + caching. AI_GATEWAY_TOKEN (authenticated gateway) is a
+# SECRET: `wrangler secret put AI_GATEWAY_TOKEN`. If AI_GATEWAY_ID is unset / the
+# token is missing, AI calls fall back to direct Anthropic — no behavior change.
+# Left commented so the default deploy routes direct; set it to enable the
+# /admin/ai-usage dashboard (which also needs CF_ANALYTICS_API_TOKEN + the
+# CLOUDFLARE_ACCOUNT_ID above, with the "Account Analytics: Read" grant).
+# AI_GATEWAY_ID = "coomander-gateway"
+#
+# NOTE: the web worker intentionally has NO [ai] binding. Workers AI (if added
+# later) runs on the AGENTS worker (apps/agents), which would declare its own
+# [ai] binding there. Don't re-add one here unless web code actually calls
+# Workers AI directly.
 
 
 # ── D1 (Cloudflare's serverless SQLite) ────────────────────────────────
