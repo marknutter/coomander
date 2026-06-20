@@ -3,11 +3,12 @@
 /**
  * WebSocket chat transport to the user's AppAgent (Cloudflare Agents SDK).
  *
- * This is the flag-gated counterpart to the JSON `POST /api/coomander/chat` path. When the
- * `coomander-agents-chat` feature flag is ON, the chat page uses this hook to hold a live
- * WebSocket to the agents sidecar Worker; the agent runs the model, streams
- * tokens back, and persists both turns through the web API (so history is
- * identical to the POST path and survives reconnect).
+ * This is the SINGLE chat transport for Coomander's in-app chat — the JSON
+ * `POST /api/coomander/chat` SEND path was removed in Phase D (#203). The chat
+ * page uses this hook to hold a live WebSocket to the agents sidecar Worker; the
+ * agent runs the model, streams tokens back, and persists both turns through the
+ * web API (so history survives reconnect — the page still LOADS it via
+ * `GET /api/coomander/chat`). The agents Worker (apps/agents) is REQUIRED for chat.
  *
  * The connection is same-origin: Caddy routes `/agents/*` to the agents Worker
  * in dev, so the Better Auth session cookie flows automatically and `useAgent`'s
@@ -63,12 +64,10 @@ type ServerFrame =
   | { type: "proactive"; message: string; conversationId?: string };
 
 /**
- * Open (or no-op) a WebSocket to the AppAgent and return a stable handle.
- *
- * @param enabled  Gate the connection on the feature flag — when false the
- *                 socket is never opened (`enabled` is forwarded to partysocket).
+ * Open a WebSocket to the AppAgent and return a stable handle. The socket
+ * always connects — it is the single chat transport (#203).
  */
-export function useAgentChat(enabled: boolean, callbacks: AgentChatCallbacks): AgentChatHandle {
+export function useAgentChat(callbacks: AgentChatCallbacks): AgentChatHandle {
   const cbRef = useRef(callbacks);
   // Keep the latest callbacks in a ref so the stable socket handlers below
   // always invoke the current ones. Assigned in an effect (not during render)
@@ -83,8 +82,6 @@ export function useAgentChat(enabled: boolean, callbacks: AgentChatCallbacks): A
     agent: "AppAgent",
     // Cosmetic — the Worker routes by validated session, not this name.
     name: "me",
-    // partysocket honors `enabled: false` by never connecting.
-    enabled,
     onOpen: () => {
       openRef.current = true;
       cbRef.current.onStatusChange?.("open");

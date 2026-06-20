@@ -317,7 +317,7 @@ async function classifyMessage(userId: string, text: string, ctx: InboundContext
   // against the message that prompted it — e.g. "normal reels" right after
   // "posted 2 gym reels" must log a drop, not ask again. The current inbound
   // message is persisted only AFTER this runs (see the webhook), so it is not
-  // duplicated here. Parity with coomanderChat.handleChatTurn.
+  // duplicated here. Parity with coomanderChat.chatSystemPrompt.
   const recent = await listMessages(userId, 10);
   const today = await userToday(userId);
   const history = recent.length
