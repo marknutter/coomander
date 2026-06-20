@@ -14,12 +14,29 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather, Ionicons } from "@expo/vector-icons";
 import * as Speech from "expo-speech";
+import { useRouter } from "expo-router";
 
-import { getThread, streamMessage, type CoomanderMessage } from "@/lib/api";
-import { authClient } from "@/lib/auth-client";
+import { getThread, type CoomanderMessage } from "@/lib/api";
 import { useTheme } from "@/lib/theme";
 import { Screen } from "@/components/screen";
 import { ApiError } from "@coomander/core";
+import {
+  useAgentSocket,
+  type SocketStatus,
+} from "@/lib/use-agent-socket";
+import {
+  reduce,
+  resetTurn,
+  initialStreamState,
+  COOMANDER_CONVERSATION_ID,
+  type ServerFrame,
+  type StreamState,
+} from "@/lib/agent-socket-protocol";
+
+// How long to wait for the WebSocket to open before surfacing an error to the
+// user (the socket auto-connects on mount and reconnects with backoff; this just
+// bounds a single send so a turn is never silently dropped).
+const SOCKET_READY_TIMEOUT_MS = 8000;
 
 // ---------------------------------------------------------------------------
 // Tag stripping (matches the web's stripTags)
@@ -156,6 +173,7 @@ function tmpId(prefix: string): string {
 export default function CoomanderChatScreen() {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const flatListRef = useRef<FlatList<UIMessage>>(null);
 
   const [input, setInput] = useState("");
@@ -166,21 +184,35 @@ export default function CoomanderChatScreen() {
   const [enabled, setEnabled] = useState(true);
   const [speakingId, setSpeakingId] = useState<string | null>(null);
 
+  // ── Agents-worker WebSocket transport — the SINGLE chat transport (#203) ──
+  // The socket always connects on mount (no flag gate, no POST/SSE fallback).
+  // `stream` is the live WebSocket turn state (folded from server frames via the
+  // pure `reduce`); wsTurnRef marks a turn in flight so a mid-turn drop cleans up
+  // the optimistic bubble + spinner and restores the input. wsResolveRef resolves
+  // the in-flight send promise on done/error/close.
+  const [stream, setStream] = useState<StreamState>(initialStreamState);
+  const wsTurnRef = useRef<{ userMsgId: string; text: string } | null>(null);
+  const wsResolveRef = useRef<(() => void) | null>(null);
+  const proactiveProcessedRef = useRef(0);
+
+  // Reload the canonical unified thread (real ids, ordering, tool side effects).
+  // Used on mount and after a WS turn finishes / a persisted proactive arrives.
+  const loadThread = useCallback(async () => {
+    const thread = await getThread();
+    setEnabled(thread.enabled);
+    setMessages(
+      thread.messages.map((m: CoomanderMessage) => ({
+        id: m.id,
+        role: m.role,
+        content: m.content,
+      })),
+    );
+  }, []);
+
   // ── Load the unified thread on mount ──────────────────────────────────
   useEffect(() => {
     let active = true;
-    getThread()
-      .then((thread) => {
-        if (!active) return;
-        setEnabled(thread.enabled);
-        setMessages(
-          thread.messages.map((m: CoomanderMessage) => ({
-            id: m.id,
-            role: m.role,
-            content: m.content,
-          })),
-        );
-      })
+    loadThread()
       .catch((e) => {
         if (!active) return;
         setError(
@@ -193,7 +225,95 @@ export default function CoomanderChatScreen() {
     return () => {
       active = false;
     };
+  }, [loadThread]);
+
+  // Fold every server frame into the pure stream state. The effects below react
+  // to the resulting `done` / `error` / `proactive` transitions.
+  const onFrame = useCallback((frame: ServerFrame) => {
+    setStream((s) => reduce(s, frame));
   }, []);
+
+  const onStatusChange = useCallback((status: SocketStatus) => {
+    // A mid-turn disconnect would otherwise leave the spinner forever. Roll back
+    // the optimistic bubble, restore the input so the user can retry, reset the
+    // stream, and show the reconnecting message — the turn is never silently
+    // dropped (#203, WS-only — no SSE fallback).
+    if (status === "closed" && wsTurnRef.current) {
+      const { userMsgId, text } = wsTurnRef.current;
+      wsTurnRef.current = null;
+      setThinking(false);
+      setStream(resetTurn);
+      setMessages((prev) => prev.filter((m) => m.id !== userMsgId));
+      setInput((cur) => (cur.length === 0 ? text : cur));
+      setError("Chat is reconnecting — please try again in a moment.");
+      wsResolveRef.current?.();
+      wsResolveRef.current = null;
+    }
+  }, []);
+
+  const { ready, send } = useAgentSocket({
+    onFrame,
+    onStatusChange,
+  });
+
+  // First streamed token means the model is producing — drop the "Thinking…" bar.
+  useEffect(() => {
+    if (stream.streamingText) setThinking(false);
+  }, [stream.streamingText]);
+
+  // Turn finished: reload the canonical thread, then drop the live bubble. The
+  // bubble shows finalText until the reload replaces it → no flicker. wsTurnRef
+  // is cleared synchronously so a post-done close isn't mistaken for a drop.
+  useEffect(() => {
+    if (!stream.done) return;
+    wsTurnRef.current = null;
+    setThinking(false);
+    wsResolveRef.current?.();
+    wsResolveRef.current = null;
+    let active = true;
+    (async () => {
+      await loadThread().catch(() => {});
+      if (active) setStream(resetTurn);
+    })();
+    return () => {
+      active = false;
+    };
+  }, [stream.done, loadThread]);
+
+  // Error frame: surface it, keep the optimistic user bubble, clear the stream.
+  useEffect(() => {
+    if (!stream.error) return;
+    setError(stream.error);
+    setThinking(false);
+    wsTurnRef.current = null;
+    setStream(resetTurn);
+    wsResolveRef.current?.();
+    wsResolveRef.current = null;
+  }, [stream.error]);
+
+  // Proactive (agent-initiated) messages. Persisted ones (carry a
+  // conversationId) are already in the thread server-side → reload to render in
+  // place; standalone ones are appended directly. A processed-index ref drains
+  // the append-only queue exactly once.
+  useEffect(() => {
+    if (stream.proactive.length <= proactiveProcessedRef.current) return;
+    const fresh = stream.proactive.slice(proactiveProcessedRef.current);
+    proactiveProcessedRef.current = stream.proactive.length;
+    if (fresh.some((p) => p.conversationId)) {
+      loadThread().catch(() => {});
+    }
+    const standalone = fresh.filter((p) => !p.conversationId);
+    if (standalone.length > 0) {
+      setMessages((prev) => [
+        ...prev,
+        ...standalone.map((p) => ({
+          id: tmpId("proactive"),
+          role: "assistant" as const,
+          content: p.message,
+        })),
+      ]);
+    }
+  }, [stream.proactive, loadThread]);
 
   // ── Auto-scroll to the bottom on new content ──────────────────────────
   useEffect(() => {
@@ -202,7 +322,40 @@ export default function CoomanderChatScreen() {
     }
   }, [messages.length, thinking]);
 
-  // ── Send one chat turn (SSE token streaming via XHR) ──────────────────
+  /**
+   * Resolve once the WebSocket is open, or reject after a timeout. The socket
+   * auto-connects on mount and reconnects with backoff, so a "not ready yet"
+   * state is usually transient — we poll briefly rather than dropping the turn.
+   * Mirrors the web client's `waitForSocket`.
+   */
+  function waitForSocket(timeoutMs: number): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      if (ready()) {
+        resolve();
+        return;
+      }
+      const start = Date.now();
+      const interval = setInterval(() => {
+        if (ready()) {
+          clearInterval(interval);
+          resolve();
+        } else if (Date.now() - start >= timeoutMs) {
+          clearInterval(interval);
+          reject(new Error("socket-not-ready"));
+        }
+      }, 100);
+    });
+  }
+
+  // ── Send one chat turn over the agents WebSocket (#203) ───────────────────
+  // The agent WebSocket is the SINGLE chat transport — the POST/SSE fallback was
+  // removed. The agent owns conversation persistence (the same unified thread as
+  // web + Telegram); we render the user turn optimistically and the live assistant
+  // bubble streams from `stream` (rendered in the FlatList footer). onFrame folds
+  // frames into `stream`; the effects above reload the canonical thread on done /
+  // surface errors. If the socket isn't open we await readiness (~8s poll); on
+  // timeout or a send-time drop we roll back the optimistic bubble, restore the
+  // input, and show the reconnecting message — the turn is never silently dropped.
   async function handleSend() {
     const text = input.trim();
     if (!text || thinking) return;
@@ -211,67 +364,50 @@ export default function CoomanderChatScreen() {
     setInput("");
     setError(null);
 
-    // Optimistic user bubble + an empty assistant bubble we stream tokens into.
-    const userMsg: UIMessage = { id: tmpId("u"), role: "user", content: text };
-    const assistantId = tmpId("a");
-    setMessages((prev) => [
-      ...prev,
-      userMsg,
-      { id: assistantId, role: "assistant", content: "" },
-    ]);
+    // Optimistic user bubble (the assistant bubble streams from `stream`).
+    const wsUserMsg: UIMessage = { id: tmpId("u"), role: "user", content: text };
+    setMessages((prev) => [...prev, wsUserMsg]);
+    setStream(resetTurn);
     setThinking(true);
 
-    let sawText = false;
-    try {
-      const fullText = await streamMessage(text, {
-        onText(accumulated) {
-          sawText = true;
-          // First delta means the model is producing — drop the "Thinking…" bar.
-          setThinking(false);
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === assistantId ? { ...m, content: accumulated } : m,
-            ),
-          );
-        },
-        onDone(final) {
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === assistantId ? { ...m, content: final } : m,
-            ),
-          );
-        },
-        onError(message) {
-          setError(message);
-        },
-      });
+    // Roll back the optimistic bubble + restore input so the user can retry.
+    const rollback = () => {
+      wsTurnRef.current = null;
+      setThinking(false);
+      setMessages((prev) => prev.filter((m) => m.id !== wsUserMsg.id));
+      setInput((cur) => (cur.length === 0 ? text : cur));
+    };
 
-      // If the stream errored before any text, roll back the empty bubbles and
-      // restore the user's text so they can retry (mirrors the old JSON path).
-      // (Tap-to-speak via the bubble's volume icon is preserved unchanged; we
-      // don't auto-speak here since the original screen never did.)
-      if (!fullText && !sawText) {
-        setMessages((prev) =>
-          prev.filter((m) => m.id !== userMsg.id && m.id !== assistantId),
-        );
-        setInput(text);
-      }
+    // Await socket readiness rather than falling back to a (now-removed) SSE path.
+    try {
+      await waitForSocket(SOCKET_READY_TIMEOUT_MS);
+    } catch {
+      console.error("[CoomanderChat] socket not ready — chat unavailable");
+      rollback();
+      setError("Chat is reconnecting — please try again in a moment.");
+      return;
+    }
+
+    // The send promise resolves when a done/error/close transition fires (the
+    // effects + onStatusChange above set wsResolveRef and reset thinking/stream).
+    try {
+      await new Promise<void>((resolve) => {
+        wsResolveRef.current = resolve;
+        const ok = send({ conversationId: COOMANDER_CONVERSATION_ID, message: text });
+        if (ok) {
+          wsTurnRef.current = { userMsgId: wsUserMsg.id, text };
+        } else {
+          // Socket dropped between the readiness check and the send — bail cleanly.
+          wsResolveRef.current = null;
+          rollback();
+          setError("Chat is reconnecting — please try again in a moment.");
+          resolve();
+        }
+      });
     } catch (e) {
-      // Transport failure: roll back the optimistic bubbles and restore input.
-      setMessages((prev) =>
-        prev.filter((m) => m.id !== userMsg.id && m.id !== assistantId),
-      );
-      setInput(text);
       setError(e instanceof ApiError ? e.message : "Message failed to send.");
-    } finally {
       setThinking(false);
     }
-  }
-
-  // ── Sign out ──────────────────────────────────────────────────────────
-  function signOut() {
-    Speech.stop();
-    authClient.signOut();
   }
 
   // ── TTS (expo-speech, ported from geology) ────────────────────────────
@@ -332,6 +468,11 @@ export default function CoomanderChatScreen() {
     [colors, speakingId],
   );
 
+  // The in-progress WebSocket assistant bubble: streamingText while tokens
+  // arrive, then finalText for the brief window before the canonical reload
+  // replaces it (no flicker). Null when no WS turn is streaming.
+  const wsLiveText = stream.streamingText ?? stream.finalText;
+
   return (
     <Screen>
       {/* Header — brand + sign out */}
@@ -346,12 +487,12 @@ export default function CoomanderChatScreen() {
           <Text style={[styles.brandName, { color: colors.foreground }]}>Coomander</Text>
         </View>
         <Pressable
-          onPress={signOut}
+          onPress={() => router.push("/settings")}
           hitSlop={8}
           accessibilityRole="button"
-          accessibilityLabel="Sign out"
+          accessibilityLabel="Settings"
         >
-          <Feather name="log-out" size={20} color={colors.mutedForeground} />
+          <Feather name="settings" size={20} color={colors.mutedForeground} />
         </Pressable>
       </View>
 
@@ -388,11 +529,26 @@ export default function CoomanderChatScreen() {
             onContentSizeChange={() =>
               flatListRef.current?.scrollToEnd({ animated: true })
             }
+            ListFooterComponent={
+              wsLiveText && wsLiveText.length > 0 ? (
+                <View style={[styles.msgRow, styles.msgRowAssistant]}>
+                  <View
+                    style={[
+                      styles.msgBubble,
+                      styles.msgBubbleAssistant,
+                      { backgroundColor: colors.card, borderColor: colors.border },
+                    ]}
+                  >
+                    <MessageText content={wsLiveText} colors={colors} isUser={false} />
+                  </View>
+                </View>
+              ) : null
+            }
           />
         )}
 
-        {/* Thinking indicator (no streaming — POST is in flight) */}
-        {thinking ? (
+        {/* Thinking indicator — POST in flight, or WS turn before its first token. */}
+        {thinking && !wsLiveText ? (
           <View style={[styles.typingBar, { borderTopColor: colors.border }]}>
             <ActivityIndicator size="small" color={colors.primary} />
             <Text style={[styles.typingText, { color: colors.mutedForeground }]}>

@@ -18,8 +18,15 @@ WORKDIR /app
 # Workspace manifests: root lockfile + root package.json + the agents
 # workspace's package.json. `npm ci` installs into /app/node_modules,
 # including the linux workerd binary wrangler dev needs.
+# packages/core's manifest is copied too so `npm ci` creates the
+# node_modules/@coomander/core workspace symlink — the agents chat engine
+# imports the shared model catalog from @coomander/core (#203). Without this,
+# npm only links workspaces whose package.json is present and the worker fails
+# to bundle with `Could not resolve "@coomander/core"`. The core SOURCE is
+# bind-mounted at runtime (see docker-compose.yml).
 COPY package.json package-lock.json ./
 COPY apps/agents/package.json ./apps/agents/package.json
+COPY packages/core/package.json ./packages/core/package.json
 RUN npm ci
 
 WORKDIR /app/apps/agents

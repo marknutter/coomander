@@ -8,6 +8,8 @@
     "conventions",
     "---UI---",
     "theming",
+    "---AI---",
+    "ai-models",
     "---Deployment---",
     "cloudflare-workers-compat"
   ]

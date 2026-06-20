@@ -1,0 +1,258 @@
+---
+title: AI Models & Provider Keys
+description: The tiered model catalog, the admin model switcher, per-user model preference, and encrypted provider-key management — all running on the WebSocket-only agents chat engine.
+---
+
+# AI Models & Provider Keys
+
+Coomander ships a **two-tier model catalog**, an **admin model switcher**, an
+optional **per-user model preference**, and **encrypted provider-key
+management**, executed by a **provider-agnostic chat engine** built on the
+**Vercel AI SDK** (epic #203). Both tiers — BYOK Claude and open Cloudflare
+Workers AI models — run through one `streamText` path on the agents Worker.
+
+> **Chat is WebSocket-only.** The legacy web SSE/POST chat path was removed in
+> #203. Every chat turn (web + mobile) flows through the agents Worker
+> (`apps/agents`) over a WebSocket. `GET /api/coomander/chat` only hydrates the
+> thread on mount/refresh; there is no `POST` send handler.
+
+## The catalog (`@coomander/core`)
+
+The single source of truth for which models exist lives in
+`@coomander/core` (`packages/core/src/chat/model-catalog.ts`) so the agent
+WebSocket engine and the web app import **one** copy and can never drift. The web
+app imports it through the re-export shim `@/lib/model-catalog`. Each entry:
+
+```ts
+interface ModelCatalogEntry {
+  id: string;            // model id passed to the provider SDK
+  label: string;         // shown in the switcher
+  provider: "anthropic" | "openai" | "google" | "cloudflare";
+  tier: "byok" | "workers-ai";
+  contextWindow: number;
+  supportsImages: boolean;
+  supportsPdf: boolean;
+  supportsTools: boolean;
+  costTier: "free" | "low" | "medium" | "high";
+  userSelectable: boolean;
+}
+```
+
+Two tiers:
+
+- **`byok`** — proprietary models that need a provider API key. Anthropic Claude
+  executes today; `openai`/`google` entries are reserved (the engine throws a
+  clearly-labelled "not yet wired — add @ai-sdk/X" error so the switch is ready
+  for future catalog entries without shipping unused deps).
+- **`workers-ai`** — open models hosted on Cloudflare Workers AI, **no key
+  needed** (billed via the CF account).
+
+Helpers (build on these, never hardcode ids in UI):
+
+```ts
+import { getModel, listModels, listUserSelectableModels, isValidModelId, DEFAULT_MODEL_ID, DEFAULT_OPEN_MODEL_ID } from "@coomander/core";
+// or, from web code, the shim: import { ... } from "@/lib/model-catalog";
+```
+
+`DEFAULT_MODEL_ID` is `claude-sonnet-4-6`. `DEFAULT_OPEN_MODEL_ID` (a
+`workers-ai` entry — `@cf/meta/llama-3.1-8b-instruct-fp8`) is the no-key fallback
+target. Add a model by appending an entry. Workers AI ids use the
+`@cf/<org>/<model>` convention.
+
+## The chat engine (`apps/agents`)
+
+Chat runs over a **single transport**: the agents WebSocket Worker
+(`apps/agents`). The legacy web SSE engine (`apps/web/lib/chat-engine.ts` +
+`POST /api/chat`) was **removed in #203** — the agents Worker is now the only
+chat engine, so it is **required for chat** (downstream projects inherit this via
+coomander-sync). The `coomander-agents-chat` flag that once gated the WS-vs-SSE
+choice was removed too — it gated nothing once the SSE path was gone.
+
+The engine splits into a **pure half** (in `@coomander/core` — catalog lookup,
+capability-gated message building, model-aware context trimming) and a
+**runtime half** (in `apps/agents/src/chat-model.ts` — provider-client wiring,
+which needs env/bindings). The turn loop lives in `apps/agents/src/chat.ts`.
+Per turn it:
+
+1. Fetches the per-turn context from the web app over the cookie-authed API
+   (`GET /api/coomander/agent-context`). The agent can't read the app DB
+   directly, so this route returns the resolved active catalog model (via
+   `resolveActiveModel({ userId })`), Coomander's system prompt
+   (`chatSystemPrompt`), and the tool schemas (`chatTools`). On any failure it
+   falls back to the configured default so chat never hard-fails.
+2. For a `byok` entry, resolves the provider key. **No-key fallback:** if there's
+   no usable key it switches to the default open model so chat still works with
+   zero config (logged; the Claude request never 401s).
+3. Maps the entry → a Vercel AI SDK `LanguageModel` via `resolveAgentModel(entry, env)`:
+
+| `provider` | tier | SDK | Auth |
+| --- | --- | --- | --- |
+| `anthropic` | `byok` | `@ai-sdk/anthropic` `createAnthropic` | API key (admin DB > `ANTHROPIC_API_KEY`), routed through the AI Gateway when enabled |
+| `cloudflare` | `workers-ai` | `workers-ai-provider` `createWorkersAI` | `AI` binding (remote-proxied by `wrangler dev` in local/Docker dev — needs `CLOUDFLARE_API_TOKEN`) — **no provider key** |
+| `openai` / `google` | `byok` | — | throws "not yet wired" (reserved) |
+
+4. Builds capability-gated messages and streams `result.textStream` back over the
+   socket, then runs the Coomander tool-use loop and tag stripping.
+
+### Capability gating (from the catalog entry)
+
+`buildModelMessages` (in `@coomander/core`) includes an **image** part only when
+`entry.supportsImages` and a **PDF** file part only when `entry.supportsPdf`.
+Office docs (xlsx/docx/pptx) are always parsed to text. When the selected model
+can't take an attachment type, it is replaced with a **user-visible note** (e.g.
+`[Attachment "x.pdf" omitted — the selected model "…" can't read PDFs; switch to
+a Claude model…]`) — never silently dropped, never a crash.
+
+### Model-aware context trimming
+
+`applyContextWindow` (in `@coomander/core`) sizes the kept tail to
+`entry.contextWindow` (reserving room for the system prompt + `maxOutputTokens`,
+~4 chars/token), summarizing dropped older messages. This replaces the old fixed
+message slice so small Workers AI windows can't overflow.
+
+### Anthropic PDF + prompt caching
+
+Preserved on the byok-anthropic path via `providerOptions.anthropic`: the system
+prompt is sent as a cacheable (`cacheControl: { type: "ephemeral" }`) system
+message, and PDFs pass through as AI SDK `file` parts (Anthropic document blocks).
+
+### Workers AI in local dev (the dev gotcha)
+
+The agent runs Workers AI open models through the `AI` binding
+(`createWorkersAI({ binding: env.AI })`, declared as `[ai] binding = "AI"` on BOTH
+the top-level and `[env.production]` wrangler envs — the top-level is what
+`wrangler dev` uses).
+
+- **On Cloudflare Workers (prod)** — the binding works directly. No key; billed
+  via the CF account.
+- **Local / Docker dev** — Workers AI inference can't run in local miniflare, so
+  `wrangler dev` proxies the `AI` binding to **remote** Cloudflare. It does this by
+  deploying a temporary **preview Worker**, so the credential needs **Workers
+  Scripts** access — **not just Workers AI**. A Workers-AI-only token can run AI
+  over REST but **403s on `edge-preview`**, so `wrangler dev` never starts.
+  - **Token:** create one from the **"Edit Cloudflare Workers"** template (grants
+    `Workers Scripts: Edit`) and add **`Workers AI: Read`**; set it as
+    **`CLOUDFLARE_API_TOKEN`** + `CLOUDFLARE_ACCOUNT_ID` (Docker reads
+    `apps/web/.env`; direct `apps/agents` dev reads `apps/agents/.dev.vars`).
+  - **Simpler for non-Docker local dev:** `wrangler login` (OAuth) — no token to
+    mint.
+  - **Heads-up:** because the `[ai]` binding makes `wrangler dev` open the remote
+    proxy **at boot**, the agents Worker won't start in Docker *at all* — even for
+    Claude-only chat — without valid CF auth. Claude itself needs only
+    `ANTHROPIC_API_KEY`. Prod (on Workers) needs neither token nor login.
+
+If neither is available, selecting an open model surfaces a clear error message
+over the socket (Claude is unaffected).
+
+#### Anthropic gateway baseURL — the `/v1` detail
+
+When the gateway is enabled, the Anthropic provider's `baseURL` is
+`https://gateway.ai.cloudflare.com/v1/{account}/{gateway}/anthropic/**v1**`. The
+trailing `/v1` is required because `@ai-sdk/anthropic` POSTs to
+`${baseURL}/messages` (and defaults its baseURL to `api.anthropic.com/v1`),
+unlike the raw `@anthropic-ai/sdk` which appended `/v1/messages` itself and so
+used a bare `.../anthropic`. Omitting the `/v1` 404s the Claude path.
+
+## Active-model resolution (`lib/active-model.ts`)
+
+`resolveActiveModel({ userId? })` returns a catalog id following precedence:
+
+```
+per-user preference  >  admin default (DB)  >  CHAT_MODEL env  >  DEFAULT_MODEL_ID
+```
+
+Every candidate is validated against the catalog — unknown ids are skipped (and
+rejected on write with a `BadRequestError`), so the result is always a known id.
+The admin default is stored in `app_settings` under key `ai.default_model`;
+per-user preferences under `ai.user_model:<userId>`.
+
+The agents Worker resolves the active model **per turn** by calling
+`GET /api/coomander/agent-context` (which runs `resolveActiveModel({ userId })`
+server-side and returns the model alongside the prompt + tools), so changing the
+default takes effect on the next chat with no redeploy. The AI Gateway routing is
+preserved for the Claude tier (via the AI SDK's Anthropic provider baseURL — see
+the chat-engine section above).
+
+## Provider keys (`lib/provider-keys.ts` + `lib/secrets-crypto.ts`)
+
+Admins set/rotate keys from **`/admin/ai-models`**. Keys are:
+
+- **Encrypted at rest** — AES-256-GCM via the Web Crypto API (no npm dep, works
+  on Node and Workers). The AES key is derived (PBKDF2-SHA-256) from
+  `PROVIDER_KEY_KEK`, falling back to `BETTER_AUTH_SECRET`.
+- **Write-only / masked** — the plaintext is never returned to the client or
+  logged. The UI shows only `configured / not configured` plus a last-4 hint.
+- **Admin-gated** — `PERMISSIONS.ADMIN_SETTINGS`.
+- Stored one row per provider in the `provider_keys` table.
+
+`resolveProviderKey(provider)` precedence:
+
+```
+admin-set key (DB, decrypted)  >  ENV var (ANTHROPIC_API_KEY / OPENAI_API_KEY / GOOGLE_API_KEY)
+```
+
+On a decrypt failure (e.g. the KEK was rotated) resolution logs a warning
+*without the value* and falls back to ENV so chat keeps working. Rotating the
+KEK orphans stored ciphertexts by design — re-enter keys after a KEK change.
+Set a dedicated `PROVIDER_KEY_KEK` in production so rotating the auth secret
+doesn't invalidate provider keys.
+
+## AI Gateway routing (optional, observability)
+
+When `AI_GATEWAY_ID` (+ `CLOUDFLARE_ACCOUNT_ID`, + `AI_GATEWAY_TOKEN` if the
+gateway is "authenticated") is set, the Claude tier is routed through a
+[Cloudflare AI Gateway](https://developers.cloudflare.com/ai-gateway/) for
+usage/cost analytics, caching, and fallback. If unset, the app calls Anthropic
+directly — no behavior change. Routing is implemented by pointing the AI SDK's
+Anthropic provider `baseURL` at the gateway (note the trailing `/v1`, above).
+
+## The `/admin/ai-usage` dashboard
+
+The in-app AI usage & cost dashboard (`/admin/ai-usage`) reads AI Gateway metrics
+(requests / tokens / cost / latency / cache-hit, per model + per user) from the
+Cloudflare GraphQL Analytics API. It requires `CF_ANALYTICS_API_TOKEN` (with
+**Account Analytics: Read**) + `CLOUDFLARE_ACCOUNT_ID` + `AI_GATEWAY_ID`. If any
+is unset, the dashboard shows a friendly empty-state.
+
+## API surface
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/api/admin/ai-models` | Catalog, admin default, effective model, key statuses (admin) |
+| PUT | `/api/admin/ai-models` | Set the admin default model (admin) |
+| PUT | `/api/admin/ai-models/keys` | Set/replace a provider key (admin, write-only) |
+| DELETE | `/api/admin/ai-models/keys?provider=…` | Remove a provider's DB key (admin) |
+| GET | `/api/settings/model-preference` | The user's preference + selectable models |
+| PUT | `/api/settings/model-preference` | Set/clear the user's preference (`modelId: string \| null`) |
+| GET | `/api/coomander/agent-context` | Per-turn context for the agent: resolved model + prompt + tools (cookie-authed) |
+
+Setting and clearing keys emits audit-log entries (`admin.provider_key_set` /
+`admin.provider_key_clear` / `admin.ai_default_model_change`) — recording who
+and which provider, never the key value.
+
+## Where users / admins configure it
+
+- **Admins** set the default model and manage encrypted provider keys at
+  **`/admin/ai-models`**, and view usage/cost at **`/admin/ai-usage`**.
+- **Users** pick a per-user model in **`/settings`**.
+
+## Environment variables
+
+| Name | Required | Description |
+| --- | --- | --- |
+| `PROVIDER_KEY_KEK` | optional | Dedicated key-encryption key. Falls back to `BETTER_AUTH_SECRET`. |
+| `ANTHROPIC_API_KEY` | optional | Anthropic (Claude) key used when no admin-set key exists. |
+| `CLOUDFLARE_API_TOKEN` | dev-only | CF token from the **"Edit Cloudflare Workers"** template (`Workers Scripts: Edit`) **+ `Workers AI: Read`**, plus `CLOUDFLARE_ACCOUNT_ID` — needed for Workers AI **open models in local/Docker dev**. `wrangler dev` proxies the `AI` binding by deploying a preview Worker, so a Workers-AI-only token won't work (403 on `edge-preview`). Non-Docker: `wrangler login` instead. On Workers (prod) the binding needs no token; Claude needs neither. |
+| `AI_GATEWAY_ID` | optional | AI Gateway name/slug. Set (+ `CLOUDFLARE_ACCOUNT_ID`) to route Claude through the gateway. |
+| `AI_GATEWAY_TOKEN` | optional | Only if the gateway is "authenticated" (`cf-aig-authorization`). |
+| `CF_ANALYTICS_API_TOKEN` | optional | CF API token with **Account Analytics: Read** — powers `/admin/ai-usage`. |
+| `OPENAI_API_KEY` | optional | Reserved (no catalog entries / not wired yet). |
+| `GOOGLE_API_KEY` | optional | Reserved (no catalog entries / not wired yet). |
+| `CHAT_MODEL` | optional | Env-level default; overridden by the admin default. |
+
+## Migration
+
+`migrations/022_create_ai_settings.sql` (and `migrations-pg/005_create_ai_settings.sql`)
+add `app_settings` and `provider_keys`. Tables are defined in both dialect
+schemas (`lib/schema.sqlite.ts`, `lib/schema.pg.ts`) and re-exported from
+`lib/schema.ts`.

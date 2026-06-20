@@ -49,9 +49,9 @@ import { UnauthorizedError, BadRequestError, errorResponse } from "@/lib/errors"
 // Logger
 import { logger } from "@/lib/logger";
 
-// AI Chat
-import { streamChat } from "@/lib/chat-engine";
-import { buildSystemPrompt, CHAT_CONFIG } from "@/lib/chat-config";
+// AI Chat (WebSocket-only via the agents worker — no SSE/POST path)
+import { chatSystemPrompt, chatTools, runCoomanderTool } from "@/lib/coomander/coomanderChat"; // Coomander chat brain
+import { getModel, listModels, DEFAULT_MODEL_ID } from "@coomander/core";                       // shared model catalog
 import { registerTagHandler, stripTags } from "@/lib/chat-tags";
 import { useVoice } from "@/lib/use-voice";
 
@@ -134,27 +134,44 @@ Same three skills, same workflows — adapted for OpenClaw's tool names (`read`/
 
 ## AI Chatbot
 
-Built-in AI chat with Anthropic Claude, voice I/O, file attachments, and conversation persistence.
+Built-in AI chat with multi-provider models (Anthropic Claude + Cloudflare
+Workers AI), voice I/O, file attachments, and conversation persistence.
 
-### Customizing the System Prompt
+**Chat is WebSocket-only.** It runs entirely on the agents Worker
+(`apps/agents`) — the legacy SSE/POST `/api/chat` (and `chat-engine.ts` /
+`chat-config.ts`) was removed in epic #203. Both web and mobile send turns over
+the WebSocket; `GET /api/coomander/chat` only hydrates the thread on mount.
 
-Edit `lib/chat-config.ts` to change the AI's personality:
+### Architecture
 
-```ts
-// Change the model
-export const CHAT_CONFIG = {
-  model: "claude-sonnet-4-20250514",  // or claude-opus-4-20250514
-  maxTokens: 1024,
-};
+- **Chat brain (prompt + tools):** `apps/web/lib/coomander/coomanderChat.ts`
+  exports `chatSystemPrompt`, `chatTools`, and `runCoomanderTool`. The agents
+  Worker can't read the app DB, so it fetches the prompt + tool schemas per turn
+  via `GET /api/coomander/agent-context` (and runs tools back over the web API).
+- **Model engine:** the multi-provider Vercel AI SDK (`streamText`) path lives in
+  `apps/agents/src/chat.ts` (turn loop) + `apps/agents/src/chat-model.ts`
+  (provider wiring — `createAnthropic` for Claude/BYOK, `createWorkersAI` for the
+  open `@cf/...` models, optional AI Gateway routing).
+- **Shared model catalog:** `@coomander/core` (`packages/core/src/chat/`) — the
+  single source of truth for catalog entries, lookups (`getModel`, `listModels`,
+  `DEFAULT_MODEL_ID`), capability-gated message building, and context trimming.
 
-// Customize the system prompt template
-export const SYSTEM_PROMPT_TEMPLATE = `You are {{APP_NAME}}'s AI assistant...`;
+### Choosing / configuring the model
 
-// Add custom instructions (injected into prompt)
-export function getCustomInstructions(): string {
-  return "You are an expert in fitness coaching...";
-}
-```
+Do NOT hardcode model ids — drive everything off the catalog + the resolution
+chain (per-user preference > admin default > `CHAT_MODEL` env > `DEFAULT_MODEL_ID`):
+
+- **Admins** set the default model and manage encrypted provider keys at
+  **`/admin/ai-models`**.
+- **Users** pick a per-user model in **`/settings`**.
+- **Usage / cost** (per model + per user) is at **`/admin/ai-usage`** (reads AI
+  Gateway metrics via the Cloudflare Analytics API).
+
+To change the AI's personality, edit the prompt/tool builders in
+`coomanderChat.ts` (served to the agent through `agent-context`) — not a static
+config file. To add a model, append an entry to the catalog in `@coomander/core`.
+See the dev wiki page `content/docs/dev/ai-models.mdx` for the full catalog,
+provider-key, and AI Gateway details.
 
 ### Tag Extraction
 
@@ -178,13 +195,15 @@ Tags are automatically stripped from the displayed response.
 
 ### Key Files
 
-- `lib/chat-engine.ts` — Anthropic client, streaming, context window
-- `lib/chat-config.ts` — Model, prompt template, customization
+- `apps/web/lib/coomander/coomanderChat.ts` — chat brain: `chatSystemPrompt`, `chatTools`, `runCoomanderTool`
+- `apps/web/app/api/coomander/agent-context/route.ts` — serves the prompt + tools to the agent per turn
+- `apps/agents/src/chat.ts` — WebSocket turn loop (streaming, tool-use, persistence)
+- `apps/agents/src/chat-model.ts` — provider wiring (Anthropic + Workers AI via the Vercel AI SDK)
+- `packages/core/src/chat/` — shared model catalog + message building (`@coomander/core`)
 - `lib/chat-tags.ts` — Tag extraction and handler registry
 - `lib/voice.ts` — VoiceService (Web Speech API + ElevenLabs TTS)
 - `lib/use-voice.ts` — React hook for voice state
 - `lib/document-parser.ts` — DOCX/XLSX/PPTX parsing
-- `app/api/chat/route.ts` — SSE streaming endpoint
 - `app/api/voice/speak/route.ts` — TTS proxy
 - `app/app/chat/page.tsx` — Chat UI
 

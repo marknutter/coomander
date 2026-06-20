@@ -1,6 +1,4 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
-import { getFlag } from "@/lib/flags";
 import { log } from "@/lib/logger";
 
 export const dynamic = "force-dynamic";
@@ -14,37 +12,22 @@ export const runtime = "nodejs";
  *
  * Response shape:
  * ```json
- * { "flags": { "coomander-agents-chat": true } }
+ * { "flags": {} }
  * ```
+ *
+ * The `coomander-agents-chat` flag was REMOVED in Phase D (#203). It once gated
+ * the WS-vs-SSE chat transport, but BOTH surfaces (web + mobile) are now
+ * WebSocket-only with the POST/SSE chat path deleted, so it gated nothing and
+ * had no remaining consumer. The endpoint is kept (returning `{ flags: {} }`) so
+ * register-a-new-flag here stays a one-line change and any caller of `/api/flags`
+ * still gets a valid shape.
  */
-export async function GET(request: Request) {
+export async function GET() {
   try {
-    // Build evaluation context from session (optional — works without auth too).
-    const session = await auth.api.getSession({ headers: request.headers }).catch(() => null);
-    const context = session
-      ? {
-          userId: session.user.id,
-          // `plan` is a Better Auth additionalField; the inferred session type
-          // doesn't carry it, so read it through a narrow cast.
-          plan: (session.user as { plan?: string }).plan || "free",
-          email: session.user.email,
-        }
-      : undefined;
-
     // ── Register flags here ────────────────────────────────────────────
-    // Each entry: [key, type, defaultValue]. Override locally with FLAG_*
-    // env vars (FLAG_COOMANDER_AGENTS_CHAT=false) or a flags.json at the repo
-    // root.
+    // Add new flags via `getFlag(key, default, context)` (build `context` from
+    // the session as before). None are registered after #203.
     const flags: Record<string, boolean | string | number> = {};
-
-    // WebSocket Coomander chat via the Agents SDK sidecar (#192). ON → a live
-    // WebSocket to the user's AppAgent (streaming, tools, proactive frames);
-    // OFF → the existing POST /api/coomander/chat path. Defaults OFF until the
-    // agents Worker is operator-deployed — the prod agents Worker route is
-    // operator-gated, so the WS connect would fail and the chat page falls back
-    // to the POST path automatically. Set FLAG_COOMANDER_AGENTS_CHAT=true to
-    // turn it on in dev.
-    flags["coomander-agents-chat"] = await getFlag("coomander-agents-chat", false, context);
 
     return NextResponse.json({ flags });
   } catch (error) {

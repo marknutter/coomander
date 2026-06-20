@@ -20,7 +20,7 @@ Verified each external HTTP SDK uses `fetch` (not `node:http`/`node:https`) and 
 
 | SDK | Import site(s) | Verdict | Severity |
 |---|---|---|---|
-| `@anthropic-ai/sdk` | `lib/chat-engine.ts` | ✅ Workers-supported runtime per Anthropic SDK docs; `fetch`-based. No change needed. | — |
+| `@anthropic-ai/sdk` / `@ai-sdk/anthropic` | `apps/agents/src/chat-model.ts` (chat engine), `lib/ai/*`, `lib/coomander/*` | ✅ Workers-supported runtime per Anthropic SDK docs; `fetch`-based. No change needed. | — |
 | `resend` | `lib/email.ts` | ✅ Workers-supported per Resend docs; `fetch`-based. No change needed. | — |
 | `stripe` | `lib/stripe.ts`, `app/api/stripe/webhook/route.ts` | ⚠️ Workers-supported since v12+ **only when constructed with** `httpClient: Stripe.createFetchHttpClient()`. Without the option the SDK reaches for `node:http` agents and fails at first call. | **Medium** — see follow-up #1 |
 | ElevenLabs (raw `fetch`) | `app/api/voice/speak/route.ts` | ✅ Already uses `fetch` directly; no SDK in the way. | — |

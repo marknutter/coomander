@@ -58,6 +58,20 @@ EMAIL_FROM = "Coomander <noreply@coomander.com>"
 CLOUDFLARE_ACCOUNT_ID = "1ed6d9117731a48060db43fabbf1a468"
 # Agents worker chat enabled in prod (#192) — WS streaming + schedule(); JSON chat is the fallback.
 FLAG_COOMANDER_AGENTS_CHAT = "true"
+# ── AI Gateway (#203) ──────────────────────────────────────────────────
+# Route AI through a Cloudflare AI Gateway (e.g. "coomander-gateway") for
+# usage/cost analytics + caching. AI_GATEWAY_TOKEN (authenticated gateway) is a
+# SECRET: `wrangler secret put AI_GATEWAY_TOKEN`. If AI_GATEWAY_ID is unset / the
+# token is missing, AI calls fall back to direct Anthropic — no behavior change.
+# Left commented so the default deploy routes direct; set it to enable the
+# /admin/ai-usage dashboard (which also needs CF_ANALYTICS_API_TOKEN + the
+# CLOUDFLARE_ACCOUNT_ID above, with the "Account Analytics: Read" grant).
+# AI_GATEWAY_ID = "coomander-gateway"
+#
+# NOTE: the web worker intentionally has NO [ai] binding. Workers AI (if added
+# later) runs on the AGENTS worker (apps/agents), which would declare its own
+# [ai] binding there. Don't re-add one here unless web code actually calls
+# Workers AI directly.
 
 
 # ── D1 (Cloudflare's serverless SQLite) ────────────────────────────────
@@ -91,6 +105,28 @@ bucket_name = "coomander-storage"
 [[services]]
 binding = "VIDEO_PROCESSOR"
 service = "coomander-video-processor"
+
+# ── Durable Object cleanup (prod outage fix, 2026-06-18) ───────────────
+# A prior out-of-band deploy registered an `AppAgent` Durable Object on THIS
+# (web) worker with no local class — AppAgent lives only in the coomander-agents
+# worker. The orphaned binding (script_name unset → expects a LOCAL class) made
+# the worker fail to instantiate on every request, returning a site-wide 401.
+# DO migrations are sticky: simply omitting the binding makes `wrangler deploy`
+# refuse with "class removed but no migration"; the class must be explicitly
+# deleted. The web app reaches AppAgent cross-worker via the service binding /
+# /agents/* route, never as a local DO, so deleting it here is correct.
+# The full chain is listed (canonical Cloudflare pattern): v1 created the orphan
+# AppAgent class on this worker, v2 deletes it. The remote worker is already at
+# v1, so only v2 is actually applied; listing v1 lets the local miniflare
+# validator (OpenNext runs getPlatformProxy at deploy) see AppAgent as a
+# created-then-deleted class instead of erroring on a "non-existent class".
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["AppAgent"]
+
+[[migrations]]
+tag = "v2"
+deleted_classes = ["AppAgent"]
 
 # ── Environment-specific overrides ─────────────────────────────────────
 # Production deploy will use `wrangler deploy --env production` and override

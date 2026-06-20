@@ -18,6 +18,7 @@
  * constants in case the context omits them).
  */
 
+import type { ModelProvider, ModelTier } from "@coomander/core";
 import type { Env } from "./index";
 import { callAsUser } from "./web-api";
 
@@ -67,6 +68,18 @@ export interface AgentContext {
   systemPrompt: string;
   /** Coomander domain tools (log_drop, advance_content_state, …) to expose. */
   tools: AgentContextTool[];
+  /**
+   * Capability + dispatch fields for the resolved model (#203 Phase B). The web
+   * app resolves the active catalog entry (admin switcher / per-user pref) and
+   * passes these so the agent can gate tools per model and dispatch the right
+   * provider client. Optional — older web builds (or a fallback resolution) may
+   * omit them, so the agent defaults conservatively (tools/images on, look the
+   * provider up from the catalog by model id).
+   */
+  supportsTools: boolean;
+  supportsImages: boolean;
+  tier?: ModelTier;
+  provider?: ModelProvider;
 }
 
 /** Web app failed to render the chat context (unreachable / 5xx / bad shape). */
@@ -117,6 +130,13 @@ export async function fetchAgentContext(env: Env, cookie: string): Promise<Agent
             typeof (t as AgentContextTool).input_schema === "object"
         )
       : [],
+    // Capability/dispatch flags — default conservatively when the web app omits
+    // them: tools + images on (Claude defaults), provider/tier left undefined so
+    // the chat loop resolves the catalog entry by model id.
+    supportsTools: data.supportsTools !== false,
+    supportsImages: data.supportsImages !== false,
+    tier: typeof data.tier === "string" ? data.tier : undefined,
+    provider: typeof data.provider === "string" ? data.provider : undefined,
   };
 }
 

@@ -5,10 +5,11 @@
  *
  * The real Coomander agent in the browser — NOT the generic template bot. It
  * renders the unified `coomander_message_log` thread (the SAME thread as
- * Telegram, so web + phone are one continuous conversation), posts turns to
- * `POST /api/coomander/chat` (Coomander converses OR takes a domain action,
- * grounded in the live TodayModel), and shows an "enable Coomander" prompt
- * instead of a dead chat when ops isn't on yet.
+ * Telegram, so web + phone are one continuous conversation), streams turns over
+ * the agents WebSocket — the SINGLE chat transport (#203) — to the user's
+ * AppAgent (Coomander converses OR takes a domain action, grounded in the live
+ * TodayModel), and shows an "enable Coomander" prompt instead of a dead chat
+ * when ops isn't on yet. The thread is still LOADED via `GET /api/coomander/chat`.
  *
  * One assistant, not two: this replaces the old `/app/chat` template chatbot.
  */
@@ -21,18 +22,25 @@ import {
 } from "lucide-react";
 import { ChatMessageContent } from "@/components/chat-message";
 import { useVoice } from "@/lib/use-voice";
+import { stripTags } from "@/lib/chat-tags";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/lib/use-toast";
 import type { AgentChatCallbacks, AgentChatHandle } from "@/lib/use-agent-chat";
 
-// Lazy bridge to the WebSocket Coomander transport (Cloudflare Agents SDK, #192).
-// Loaded via next/dynamic({ ssr: false }) and mounted ONLY when the
-// `coomander-agents-chat` flag is on, so flag-off users never bundle or load the
-// agent client — the POST /api/coomander/chat path stays byte-for-byte as it was.
+// Lazy bridge to the WebSocket Coomander transport (Cloudflare Agents SDK).
+// It is the SINGLE chat transport (#203) — the POST /api/coomander/chat SEND
+// path was removed, so the agents Worker is REQUIRED for chat. Loaded via
+// next/dynamic({ ssr: false }) so the agent client only loads client-side, but
+// it is ALWAYS mounted (no flag gate).
 const AgentChatBridge = dynamic(() => import("@/components/agent-chat-bridge"), {
   ssr: false,
 });
+
+// How long to wait for the WebSocket to open before surfacing an error to the
+// user (the socket auto-connects on mount and reconnects with backoff; this just
+// bounds a single send so a turn is never silently dropped).
+const SOCKET_READY_TIMEOUT_MS = 8000;
 
 interface Message {
   id: string;
@@ -63,16 +71,22 @@ function CoomanderChat() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const sendingRef = useRef(false);
+  // Mirror audioEnabled + speak into refs so the memoized WS callbacks read the
+  // live values (they're memoized on [loadThread], and speak is declared after
+  // them — refs avoid both a stale closure and a temporal-dead-zone reference).
+  const audioEnabledRef = useRef(false);
+  useEffect(() => { audioEnabledRef.current = audioEnabled; }, [audioEnabled]);
+  const speakRef = useRef<((text: string) => Promise<void>) | null>(null);
 
-  // ── Agents-chat (WebSocket) transport, flag-gated (#192) ──────────────────
-  // wsEnabled mirrors the `coomander-agents-chat` flag; the bridge (and thus
-  // the socket) only mounts while flag-on + ops enabled. streamText is the live
-  // streaming assistant bubble (null = no WS turn in flight); wsTurnRef marks a
-  // turn sent over the socket so a mid-turn disconnect cleans up without
-  // touching POST-path turns.
-  const [wsEnabled, setWsEnabled] = useState(false);
+  // ── Agents-chat (WebSocket) transport — the SINGLE chat transport (#203) ──
+  // The bridge (and thus the socket) is always mounted once ops is enabled.
+  // streamText is the live streaming assistant bubble (null = no WS turn in
+  // flight); wsTurnRef marks a turn in flight over the socket so a mid-turn
+  // disconnect cleans up the optimistic bubble + spinner. wsResolveRef resolves
+  // the in-flight send promise on done/error.
   const [streamText, setStreamText] = useState<string | null>(null);
   const wsTurnRef = useRef(false);
+  const wsResolveRef = useRef<(() => void) | null>(null);
   const agentHandleRef = useRef<AgentChatHandle | null>(null);
   const setAgentHandle = useCallback((h: AgentChatHandle | null) => {
     agentHandleRef.current = h;
@@ -106,24 +120,6 @@ function CoomanderChat() {
       });
   }, [loadThread, scrollToBottom]);
 
-  // Resolve the coomander-agents-chat flag once on mount (#192). The agent
-  // socket only connects after this resolves true AND ops is enabled. Flag-off
-  // (the default until the agents Worker is deployed) keeps the POST path.
-  useEffect(() => {
-    let cancelled = false;
-    fetch("/api/flags")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (!cancelled) setWsEnabled(Boolean(d?.flags?.["coomander-agents-chat"]));
-      })
-      .catch(() => {
-        // Flag endpoint unavailable — stay on the POST path.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   // Callbacks the WebSocket bridge invokes. Coomander has one unified thread, so
   // the conversation id is always the "coomander" sentinel and there's nothing
   // to track per turn — on done/proactive we reload the canonical thread (real
@@ -132,12 +128,16 @@ function CoomanderChat() {
     () => ({
       onConversation: () => {},
       onToken: (text) => setStreamText((prev) => (prev ?? "") + text),
-      onDone: async () => {
+      onDone: async (_conversationId, fullText) => {
         wsTurnRef.current = false;
         setSending(false);
         sendingRef.current = false;
         await loadThread().catch(() => {});
         setStreamText(null);
+        const clean = stripTags(fullText);
+        if (audioEnabledRef.current && clean) speakRef.current?.(clean).catch(() => {});
+        wsResolveRef.current?.();
+        wsResolveRef.current = null;
       },
       onError: (message) => {
         wsTurnRef.current = false;
@@ -148,6 +148,8 @@ function CoomanderChat() {
           ...m,
           { id: `err-${Date.now()}`, role: "assistant", content: message },
         ]);
+        wsResolveRef.current?.();
+        wsResolveRef.current = null;
       },
       // An agent-initiated message outside any user turn (a schedule_followup
       // reminder). When it carries the thread id it was already persisted
@@ -169,6 +171,8 @@ function CoomanderChat() {
           setStreamText(null);
           setSending(false);
           sendingRef.current = false;
+          wsResolveRef.current?.();
+          wsResolveRef.current = null;
         }
       },
     }),
@@ -217,9 +221,44 @@ function CoomanderChat() {
     onTurnEnd: (transcript) => { void handleSend(transcript); },
     onError: (err) => console.error("[Voice]", err),
   });
+  // Keep speakRef pointing at the live speak fn for the memoized WS callbacks.
+  useEffect(() => { speakRef.current = speak; }, [speak]);
+
+  /**
+   * Resolve once the WebSocket is open, or reject after a timeout. The socket
+   * auto-connects on mount and reconnects with backoff, so a "not ready yet"
+   * state is usually transient — we poll briefly rather than dropping the turn.
+   */
+  function waitForSocket(timeoutMs: number): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      if (agentHandleRef.current?.ready()) {
+        resolve();
+        return;
+      }
+      const start = Date.now();
+      const interval = setInterval(() => {
+        if (agentHandleRef.current?.ready()) {
+          clearInterval(interval);
+          resolve();
+        } else if (Date.now() - start >= timeoutMs) {
+          clearInterval(interval);
+          reject(new Error("socket-not-ready"));
+        }
+      }, 100);
+    });
+  }
 
   // Hoisted function declaration so useVoice (above) and the seed effect (below)
   // can both reference it without a temporal-dead-zone problem.
+  //
+  // The agents WebSocket is the SINGLE chat transport (#203) — the legacy
+  // POST /api/coomander/chat SEND path was removed. The agent owns conversation
+  // persistence (the same unified thread as Telegram); we render the user turn
+  // optimistically and `onDone` reloads the canonical thread to reconcile ids +
+  // tool side effects. If the socket isn't open we await readiness (~8s poll)
+  // rather than dropping the turn; on timeout (or a send-time socket drop) we
+  // roll back the optimistic bubble, restore the input, and surface a
+  // "reconnecting" toast — the turn is never silently dropped.
   async function handleSend(overrideText?: string) {
     const text = (overrideText ?? input).trim();
     if (!text || sendingRef.current) return;
@@ -229,47 +268,48 @@ function CoomanderChat() {
     setInput("");
     setSending(true);
     sendingRef.current = true;
+    setStreamText("");
 
-    // Flag-on path: stream the turn over the WebSocket to the user's AppAgent
-    // (#192). Falls through to the POST path whenever the socket isn't open
-    // (flag off, pre-connect window, prod before the agents Worker route is
-    // live, or a reconnect in progress) — the POST path stays the universal
-    // fallback. onDone/onError reset sending + reload the canonical thread.
-    if (wsEnabled && enabled && agentHandleRef.current?.ready()) {
-      const ok = agentHandleRef.current.send({ conversationId: "coomander", message: text });
-      if (ok) {
-        wsTurnRef.current = true;
-        setStreamText("");
-        return;
-      }
-    }
-
-    try {
-      const res = await fetch("/api/coomander/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text }),
-      });
-      if (!res.ok) throw new Error(`chat turn failed: ${res.status}`);
-      const data = (await res.json()) as { reply: string; acted: boolean };
-
-      setMessages((prev) => [
-        ...prev,
-        { id: `reply-${Date.now()}`, role: "assistant", content: data.reply, acted: data.acted },
-      ]);
-
-      if (audioEnabled && data.reply) {
-        speak(data.reply).catch(() => {});
-      }
-    } catch (err) {
-      console.error("[Coomander chat]", err);
-      toast.error("Coomander couldn't respond. Try again.");
-      // Roll back the optimistic user bubble so the thread stays truthful.
+    // Roll back the optimistic bubble + restore the input so the user can retry.
+    const rollback = () => {
+      wsTurnRef.current = false;
+      setStreamText(null);
       setMessages((prev) => prev.filter((m) => m.id !== optimistic.id));
       setInput(text);
-    } finally {
       setSending(false);
       sendingRef.current = false;
+    };
+
+    // Await socket readiness rather than falling back to a (now-removed) POST
+    // path. If it never connects, undo the optimistic bubble and toast.
+    try {
+      await waitForSocket(SOCKET_READY_TIMEOUT_MS);
+    } catch {
+      console.error("[Coomander chat] socket not ready — chat unavailable");
+      rollback();
+      toast.error("Coomander is reconnecting — try again in a moment.");
+      return;
+    }
+
+    // The send promise resolves when a done/error/close frame arrives (the
+    // memoized WS callbacks set wsResolveRef + reset sending/streamText).
+    try {
+      await new Promise<void>((resolve) => {
+        wsResolveRef.current = resolve;
+        const ok =
+          agentHandleRef.current?.send({ conversationId: "coomander", message: text }) ?? false;
+        if (ok) {
+          wsTurnRef.current = true;
+        } else {
+          // Socket dropped between the readiness check and send — bail cleanly.
+          wsResolveRef.current = null;
+          rollback();
+          toast.error("Coomander is reconnecting — try again in a moment.");
+          resolve();
+        }
+      });
+    } catch (err) {
+      console.error("[Coomander chat] send failed", err);
     }
   }
 
@@ -428,11 +468,10 @@ function CoomanderChat() {
       {/* Hidden audio element for TTS */}
       <audio ref={audioRef} className="hidden" />
 
-      {/* WebSocket transport bridge (#192) — mounted only when the
-          coomander-agents-chat flag is on AND ops is enabled. This is the only
-          thing that ever opens the agent WebSocket; flag-off users never load
-          it and the POST /api/coomander/chat path is unchanged. */}
-      {wsEnabled && enabled && !loading && (
+      {/* WebSocket transport bridge — the SINGLE chat transport (#203). Mounted
+          once ops is enabled (no flag gate). This is the only thing that opens
+          the agent WebSocket; the agents Worker is REQUIRED for chat. */}
+      {enabled && !loading && (
         <AgentChatBridge callbacks={agentCallbacks} onHandle={setAgentHandle} />
       )}
 
