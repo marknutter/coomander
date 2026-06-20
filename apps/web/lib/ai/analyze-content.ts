@@ -66,7 +66,7 @@ export interface AnalyzeResult {
 
 async function analyzePostVisual(imageUrl: string): Promise<VisualAnalysis> {
   const response = await getClient().messages.create({
-    model: "claude-sonnet-4-20250514",
+    model: "claude-sonnet-4-6",
     max_tokens: 500,
     messages: [{
       role: "user",
@@ -340,7 +340,7 @@ export async function generateContentReport(
   };
 
   const response = await getClient().messages.create({
-    model: "claude-sonnet-4-20250514",
+    model: "claude-sonnet-4-6",
     max_tokens: 2000,
     messages: [{
       role: "user",
@@ -457,7 +457,7 @@ export async function elaboratePattern(
     .limit(20);
 
   const response = await getClient().messages.create({
-    model: "claude-sonnet-4-20250514",
+    model: "claude-sonnet-4-6",
     max_tokens: 1500,
     messages: [{
       role: "user",

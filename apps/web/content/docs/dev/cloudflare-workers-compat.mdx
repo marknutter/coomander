@@ -93,7 +93,7 @@ All HTTP-based SDKs work on Workers under `nodejs_compat`. The codebase uses:
 
 | SDK | Used in | Verdict |
 | --- | --- | --- |
-| `@anthropic-ai/sdk` | `lib/chat-engine.ts` | ✅ — fetch-based, supports Workers |
+| `@anthropic-ai/sdk` / `@ai-sdk/anthropic` | `apps/agents/src/chat-model.ts` (chat engine), `lib/ai/*`, `lib/coomander/*` | ✅ — fetch-based, supports Workers |
 | `resend` | `lib/email.ts` | ✅ — fetch-based |
 | `elevenlabs` | (chat voice path) | ✅ — fetch-based |
 | `stripe` | `lib/stripe.ts`, `app/api/stripe/webhook/route.ts` | ✅ — Stripe SDK supports Workers explicitly via `httpClient: Stripe.createFetchHttpClient()` if needed; default works under `nodejs_compat` |
