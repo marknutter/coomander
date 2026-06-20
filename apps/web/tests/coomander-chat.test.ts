@@ -1,10 +1,8 @@
 import { describe, it, expect } from "vitest";
-import type Anthropic from "@anthropic-ai/sdk";
 import {
-  handleChatTurn,
+  runCoomanderTool,
   recentTurns,
   roleForDirection,
-  type ChatModelFn,
 } from "@/lib/coomander/coomanderChat";
 import {
   appendMessage,
@@ -39,113 +37,52 @@ function seedUser(): string {
   return id;
 }
 
-// ── Model stub helpers (no network) ─────────────────────────────────────────
-function textModel(text: string): ChatModelFn {
-  return async () => ({
-    content: [{ type: "text", text, citations: [] } as unknown as Anthropic.ContentBlock],
-  });
-}
+// ── Domain-tool execution (runCoomanderTool) ─────────────────────────────────
+// Phase D (#203) removed the SSE/POST chat path (handleChatTurn / streamChatTurn);
+// the conversational TEXT path now lives in the agents Worker (QA'd live). The
+// SHARED domain executor — resolveToolUse + executeAction — is still reachable
+// via runCoomanderTool (the agents Worker's tool proxy), so the routing/domain
+// coverage below is re-pointed there. It runs the EXACT same path the old
+// handleChatTurn tool branch used: action !== null when a domain action fired,
+// note is the user-facing reply.
+//
+// NOTE: the old "persists the inbound message with its toolCall recorded" case
+// tested message-row persistence (a handleChatTurn wiring concern, now the agent
+// Worker's job), NOT resolveToolUse/executeAction. It was dropped here; toolCall
+// round-trip persistence is independently covered by coomander-messages.test.ts.
 
-function toolModel(name: string, input: Record<string, unknown>): ChatModelFn {
-  return async () => ({
-    content: [
-      { type: "tool_use", id: "toolu_test", name, input } as unknown as Anthropic.ContentBlock,
-    ],
-  });
-}
-
-// ── A. Conversational turn ───────────────────────────────────────────────────
-describe("handleChatTurn — conversational (text) turn", () => {
-  it("returns acted=false and the stubbed reply (trimmed)", async () => {
-    const userId = seedUser();
-    const res = await handleChatTurn(userId, "what should I focus on today?", {
-      model: textModel("  Here's what I'd focus on today.  "),
-    });
-    expect(res.acted).toBe(false);
-    expect(res.reply).toBe("Here's what I'd focus on today.");
-  });
-
-  it("persists BOTH the inbound user text and outbound reply, user before reply", async () => {
-    const userId = seedUser();
-    await handleChatTurn(userId, "hello there", {
-      model: textModel("Hi, ready when you are."),
-    });
-
-    const rows = await listMessages(userId, 100);
-    const userRow = rows.find(
-      (r) => r.direction === "inbound" && r.text === "hello there",
-    );
-    const replyRow = rows.find(
-      (r) => r.direction === "outbound" && r.text === "Hi, ready when you are.",
-    );
-    expect(userRow).toBeTruthy();
-    expect(replyRow).toBeTruthy();
-    // user message persisted before the reply
-    expect(rows.indexOf(userRow!)).toBeLessThan(rows.indexOf(replyRow!));
-  });
-});
-
-// ── B. Tool-use turn writes domain rows (routing parity) ─────────────────────
-describe("handleChatTurn — tool-use turn writes domain rows", () => {
-  it("mark_blocker sets today to a bad day and replies non-empty; acted=true", async () => {
+// ── B. Tool-use writes domain rows (routing parity) ──────────────────────────
+describe("runCoomanderTool — tool-use writes domain rows", () => {
+  it("mark_blocker sets today to a bad day, returns the tool name + a non-empty note", async () => {
     const userId = seedUser();
     await seedOpsDefaults(userId);
 
-    const res = await handleChatTurn(userId, "can't shoot today, sick", {
-      model: toolModel("mark_blocker", { reason: "sick today" }),
-    });
-    expect(res.acted).toBe(true);
-    expect(res.reply.length).toBeGreaterThan(0);
+    const res = await runCoomanderTool(userId, "mark_blocker", { reason: "sick today" });
+    expect(res.action).toBe("mark_blocker");
+    expect(res.note.length).toBeGreaterThan(0);
 
     const day = await getDayState(userId, await userToday(userId));
     expect(day?.day_quality).toBe("bad");
   });
 
-  it("add_procurement_item creates a procurement row; acted=true", async () => {
+  it("add_procurement_item creates a procurement row; action names the tool", async () => {
     const userId = seedUser();
     await seedOpsDefaults(userId);
 
-    const res = await handleChatTurn(userId, "I need new ring lights", {
-      model: toolModel("add_procurement_item", {
-        category: "shoot_prep",
-        label: "ring lights",
-      }),
+    const res = await runCoomanderTool(userId, "add_procurement_item", {
+      category: "shoot_prep",
+      label: "ring lights",
     });
-    expect(res.acted).toBe(true);
+    expect(res.action).toBe("add_procurement_item");
 
     const items = await listProcurement(userId);
     expect(items.some((p) => p.label === "ring lights")).toBe(true);
   });
-
-  it("persists the inbound message with its toolCall recorded (names the tool); reply persists too", async () => {
-    const userId = seedUser();
-    await seedOpsDefaults(userId);
-
-    await handleChatTurn(userId, "I need a new tripod", {
-      model: toolModel("add_procurement_item", {
-        category: "shoot_prep",
-        label: "tripod",
-      }),
-    });
-
-    const rows = await listMessages(userId, 100);
-    const inbound = rows.find(
-      (r) => r.direction === "inbound" && r.text === "I need a new tripod",
-    );
-    expect(inbound).toBeTruthy();
-    expect(inbound!.toolCall).not.toBeNull();
-    // the recorded tool call names the tool somewhere in its JSON
-    expect(JSON.stringify(inbound!.toolCall)).toContain("add_procurement_item");
-
-    const outbound = rows.find((r) => r.direction === "outbound");
-    expect(outbound).toBeTruthy();
-    expect(outbound!.text.length).toBeGreaterThan(0);
-  });
 });
 
 // ── C. log_drop routes to a real beat ────────────────────────────────────────
-describe("handleChatTurn — log_drop routes to a seeded beat", () => {
-  it("logs a drop against a real beat id; acted=true and a drop row exists", async () => {
+describe("runCoomanderTool — log_drop routes to a seeded beat", () => {
+  it("logs a drop against a real beat id; action names the tool and a drop row exists", async () => {
     const userId = seedUser();
     await seedOpsDefaults(userId);
 
@@ -153,10 +90,8 @@ describe("handleChatTurn — log_drop routes to a seeded beat", () => {
     expect(beats.length).toBeGreaterThan(0);
     const beatId = beats[0].id;
 
-    const res = await handleChatTurn(userId, "posted the gym reel", {
-      model: toolModel("log_drop", { beat_id: beatId, kind: "shipped" }),
-    });
-    expect(res.acted).toBe(true);
+    const res = await runCoomanderTool(userId, "log_drop", { beat_id: beatId, kind: "shipped" });
+    expect(res.action).toBe("log_drop");
 
     const drops = await listDrops(userId);
     expect(drops.some((d) => d.beat_id === beatId)).toBe(true);

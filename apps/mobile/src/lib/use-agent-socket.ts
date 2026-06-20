@@ -17,16 +17,15 @@
  *     "me" is cosmetic.
  *
  * The hook stays thin: it parses each frame with `parseServerFrame` and forwards
- * it via `onFrame` (the screen folds frames into StreamState with `reduce`).
- * The POST/SSE path (lib/api.ts `streamMessage`) remains the universal fallback
- * whenever this socket isn't open.
+ * it via `onFrame` (the screen folds frames into StreamState with `reduce`). It
+ * is the SINGLE mobile chat transport (#203) — the POST/SSE fallback was removed,
+ * so the socket always connects on mount.
  */
 
 import { useCallback, useEffect, useRef } from "react";
 
 import { authClient, API_URL } from "./auth-client";
 import {
-  AGENTS_CHAT_FLAG,
   buildWsUrl,
   encodeChatFrame,
   parseServerFrame,
@@ -36,8 +35,6 @@ import {
 export type SocketStatus = "connecting" | "open" | "closed";
 
 export interface UseAgentSocketArgs {
-  /** Open the socket only when true (flag on + ops enabled). False → never connect. */
-  enabled: boolean;
   /** Invoked with every parsed server frame. */
   onFrame: (frame: ServerFrame) => void;
   /** Invoked on connection lifecycle transitions. */
@@ -76,7 +73,6 @@ const RNWebSocket = WebSocket as unknown as {
 };
 
 export function useAgentSocket({
-  enabled,
   onFrame,
   onStatusChange,
 }: UseAgentSocketArgs): AgentSocketHandle {
@@ -96,8 +92,9 @@ export function useAgentSocket({
   const openRef = useRef(false);
 
   useEffect(() => {
-    if (!enabled) return;
-
+    // The socket always connects on mount — it is the single chat transport
+    // (#203). Auth is still gated inside `connect()`: with no session cookie we
+    // mark stopped and a later mount (after sign-in) re-runs this effect.
     let cancelled = false;
     let attempt = 0;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -210,7 +207,9 @@ export function useAgentSocket({
         }
       }
     };
-  }, [enabled]);
+    // Connect once on mount; reconnection is handled internally with backoff.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const send = useCallback<AgentSocketHandle["send"]>((args) => {
     const ws = socketRef.current;
@@ -226,28 +225,4 @@ export function useAgentSocket({
   const ready = useCallback(() => openRef.current, []);
 
   return { ready, send };
-}
-
-/**
- * Resolve the `coomander-agents-chat` flag from the web app's `GET /api/flags`.
- * Attaches the session cookie + Origin like the rest of the mobile API client.
- * Returns false on any failure (endpoint down, network error, non-OK) so the app
- * stays on the POST/SSE path — the flag-off default is always safe.
- */
-export async function fetchAgentChatFlag(apiUrl: string = API_URL): Promise<boolean> {
-  try {
-    const cookie = authClient.getCookie();
-    const res = await fetch(`${apiUrl}/api/flags`, {
-      headers: {
-        Accept: "application/json",
-        Origin: apiUrl,
-        ...(cookie ? { Cookie: cookie } : {}),
-      },
-    });
-    if (!res.ok) return false;
-    const data = (await res.json()) as { flags?: Record<string, unknown> } | null;
-    return Boolean(data?.flags?.[AGENTS_CHAT_FLAG]);
-  } catch {
-    return false;
-  }
 }

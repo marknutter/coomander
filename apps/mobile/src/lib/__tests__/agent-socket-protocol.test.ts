@@ -1,11 +1,9 @@
 import {
   COOMANDER_CONVERSATION_ID,
-  AGENTS_CHAT_FLAG,
   AGENT_PATH_PREFIX,
   parseServerFrame,
   encodeChatFrame,
   buildWsUrl,
-  shouldUseSocket,
   initialStreamState,
   reduce,
   resetTurn,
@@ -14,10 +12,6 @@ import {
 describe("exported constants", () => {
   it("COOMANDER_CONVERSATION_ID is 'coomander'", () => {
     expect(COOMANDER_CONVERSATION_ID).toBe("coomander");
-  });
-
-  it("AGENTS_CHAT_FLAG is 'coomander-agents-chat'", () => {
-    expect(AGENTS_CHAT_FLAG).toBe("coomander-agents-chat");
   });
 
   it("AGENT_PATH_PREFIX is '/agents/app-agent'", () => {
@@ -365,48 +359,6 @@ describe("buildWsUrl", () => {
   it("treats the scheme case-insensitively (HTTP)", () => {
     expect(buildWsUrl("HTTP://localhost:3005")).toBe(
       "ws://localhost:3005/agents/app-agent/me"
-    );
-  });
-});
-
-describe("shouldUseSocket", () => {
-  it("returns true when flag on, entitled true, ready true", () => {
-    expect(
-      shouldUseSocket({ flagEnabled: true, entitled: true, socketReady: true })
-    ).toBe(true);
-  });
-
-  it("returns true when entitled is undefined (flag on, ready true)", () => {
-    expect(shouldUseSocket({ flagEnabled: true, socketReady: true })).toBe(true);
-  });
-
-  it("returns false when entitled is explicitly false", () => {
-    expect(
-      shouldUseSocket({ flagEnabled: true, entitled: false, socketReady: true })
-    ).toBe(false);
-  });
-
-  it("returns false when the flag is off (even if everything else passes)", () => {
-    expect(
-      shouldUseSocket({ flagEnabled: false, entitled: true, socketReady: true })
-    ).toBe(false);
-  });
-
-  it("returns false when the flag is off and entitled is undefined", () => {
-    expect(shouldUseSocket({ flagEnabled: false, socketReady: true })).toBe(
-      false
-    );
-  });
-
-  it("returns false when socketReady is false", () => {
-    expect(
-      shouldUseSocket({ flagEnabled: true, entitled: true, socketReady: false })
-    ).toBe(false);
-  });
-
-  it("returns false when socketReady is false and entitled undefined", () => {
-    expect(shouldUseSocket({ flagEnabled: true, socketReady: false })).toBe(
-      false
     );
   });
 });

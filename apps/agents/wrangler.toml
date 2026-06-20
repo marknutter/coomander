@@ -15,6 +15,21 @@ compatibility_flags = ["nodejs_compat"]
 # container netns. Prod uses the WEB service binding instead.
 WEB_ORIGIN = "http://127.0.0.1:3000"
 
+# AI Gateway routing for the Anthropic provider — usage/cost analytics for the
+# agent chatbot (#203, mirrors the app worker). Set CLOUDFLARE_ACCOUNT_ID +
+# AI_GATEWAY_ID to route Claude calls through the gateway; leave AI_GATEWAY_ID
+# commented (or unset) to go DIRECT to Anthropic. AI_GATEWAY_TOKEN (authenticated
+# gateway) is a SECRET via `wrangler secret put`, never a [var].
+CLOUDFLARE_ACCOUNT_ID = "1ed6d9117731a48060db43fabbf1a468"
+# AI_GATEWAY_ID = "coomander-gateway"
+
+# Workers AI binding — lets the agent run open (Workers AI) models via
+# createWorkersAI({ binding: env.AI }), mirroring the app worker (#203). Billed
+# via the Cloudflare account; no API key. Named envs do NOT inherit bindings, so
+# this is redeclared under [env.production] below.
+[ai]
+binding = "AI"
+
 # Secrets (NOT declared here): ANTHROPIC_API_KEY (chat) and
 # AGENTS_INTERNAL_SECRET (server-to-server calls for scheduled wakes) come from
 # .dev.vars / apps/web/.env.local in dev and `wrangler secret put <NAME>` in
@@ -60,6 +75,12 @@ routes = [
 # (internal — no public hop). WEB_ORIGIN still supplies the request URL so the
 # Host/origin is correct for Better Auth; point it at the app's public origin.
 WEB_ORIGIN = "https://coomander.com"
+# AI Gateway routing — usage/cost analytics for the agent chatbot (#203, mirrors
+# the app worker). AI_GATEWAY_TOKEN (authenticated gateway) is a SECRET set via
+# `wrangler secret put AI_GATEWAY_TOKEN --env production`. Leave AI_GATEWAY_ID
+# commented until a gateway exists → direct Anthropic.
+CLOUDFLARE_ACCOUNT_ID = "1ed6d9117731a48060db43fabbf1a468"
+# AI_GATEWAY_ID = "coomander-gateway"
 
 # Service binding agents → app worker. Session validation + persistence + the
 # internal-secret routes go through this, never a public HTTP round-trip.
@@ -76,3 +97,8 @@ class_name = "AppAgent"
 [[env.production.migrations]]
 tag = "v1"
 new_sqlite_classes = ["AppAgent"]
+
+# NOT inherited from the top-level env — redeclare the Workers AI binding for
+# production (named envs don't inherit bindings/vars/migrations).
+[env.production.ai]
+binding = "AI"

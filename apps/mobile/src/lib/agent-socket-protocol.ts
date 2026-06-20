@@ -1,7 +1,8 @@
 /**
  * Pure, framework-free protocol + state logic for the agents-worker WebSocket
- * chat transport (#199). NO React/React Native imports — this module is the
- * unit-tested heart of the mobile streaming path and must stay portable.
+ * chat transport — the SINGLE mobile chat transport (#203; the POST/SSE fallback
+ * was removed). NO React/React Native imports — this module is the unit-tested
+ * heart of the mobile streaming path and must stay portable.
  *
  * It mirrors the wire protocol the agents Worker speaks (apps/agents/src/chat.ts
  * for chat-turn frames + apps/agents/src/index.ts `deliverProactive` for the
@@ -28,9 +29,6 @@
 
 /** Coomander has one unified thread per user; this is the sentinel id. */
 export const COOMANDER_CONVERSATION_ID = "coomander";
-
-/** The Cloudflare Flagship key that gates the WebSocket transport (#192). */
-export const AGENTS_CHAT_FLAG = "coomander-agents-chat";
 
 /**
  * The agents Worker routes `/agents/<kebab-binding>/<name>`. The binding is
@@ -131,22 +129,6 @@ export function buildWsUrl(apiUrl: string, name = "me"): string {
   // after "http"), so the order is just for clarity.
   const wsBase = base.replace(/^https:/i, "wss:").replace(/^http:/i, "ws:");
   return `${wsBase}${AGENT_PATH_PREFIX}/${encodeURIComponent(name)}`;
-}
-
-/**
- * Decide whether a turn should go over the WebSocket. The POST/SSE path is the
- * universal fallback, so this is true ONLY when the flag is on, the user is
- * entitled (when chat is gated — `undefined` means "not gated"), and the socket
- * is actually open right now. Any false → caller falls back to POST/SSE.
- */
-export function shouldUseSocket(args: {
-  flagEnabled: boolean;
-  entitled?: boolean;
-  socketReady: boolean;
-}): boolean {
-  if (!args.flagEnabled) return false;
-  if (args.entitled === false) return false;
-  return args.socketReady;
 }
 
 // ── Stream reducer (the testable heart) ──────────────────────────────────────

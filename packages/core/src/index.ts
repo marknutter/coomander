@@ -5,6 +5,11 @@
  * react-dom, Node built-ins, or DOM globals.
  */
 
+// Shared chat logic: model catalog, capability-gated message building, context
+// trimming. Imported by both chat engines (web SSE + agent WebSocket) so the
+// two transports never drift. Provider-client wiring stays per-worker.
+export * from "./chat";
+
 // HTTP primitives + the typed error.
 export { ApiError } from "./http";
 export type { FetchLike, RequestInitLike, ResponseLike } from "./http";

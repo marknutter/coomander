@@ -626,3 +626,28 @@ export const weeklyReviews = pgTable("weekly_reviews", {
 
 export type WeeklyReviewRow = typeof weeklyReviews.$inferSelect;
 export type NewWeeklyReviewRow = typeof weeklyReviews.$inferInsert;
+
+// ─── AI Gateway: app settings + encrypted provider keys (#203) ───────────────
+// app_settings: app-wide key/value store (e.g. the active default chat model).
+// provider_keys: one encrypted API key per provider (lib/provider-keys.ts).
+// The plaintext key is NEVER stored — encrypted_key holds AES-GCM ciphertext.
+export const appSettings = pgTable("app_settings", {
+  key: text("key").primaryKey(),
+  value: text("value"),
+  updated_at: integer("updated_at").notNull().default(sql`extract(epoch from now())::integer`),
+  updated_by: text("updated_by").references(() => user.id, { onDelete: "set null" }),
+});
+
+export const providerKeys = pgTable("provider_keys", {
+  provider: text("provider").primaryKey(),
+  encrypted_key: text("encrypted_key").notNull(),
+  key_hint: text("key_hint"),
+  created_at: integer("created_at").notNull().default(sql`extract(epoch from now())::integer`),
+  updated_at: integer("updated_at").notNull().default(sql`extract(epoch from now())::integer`),
+  updated_by: text("updated_by").references(() => user.id, { onDelete: "set null" }),
+});
+
+export type AppSetting = typeof appSettings.$inferSelect;
+export type NewAppSetting = typeof appSettings.$inferInsert;
+export type ProviderKeyRow = typeof providerKeys.$inferSelect;
+export type NewProviderKeyRow = typeof providerKeys.$inferInsert;

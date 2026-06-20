@@ -4,9 +4,19 @@
  *
  * Lives in its own module so `AppAgent.onMessage` stays thin: the agent runs
  * the auth `revalidateConnection` gate, then delegates the parsed user turn
- * here. This module owns the per-turn context fetch, the Anthropic call, the
+ * here. This module owns the per-turn context fetch, the model call, the
  * tool-use loop, token streaming back over the socket, thread persistence
  * through the web API, and tag stripping.
+ *
+ * As of epic #203 the model call runs through the SAME multi-provider Vercel AI
+ * SDK path (`streamText`) the web SSE engine uses: the active catalog entry
+ * (admin switcher / per-user pref, fetched per turn via agent-context) is mapped
+ * to an AI SDK `LanguageModel` by the per-worker provider wiring (chat-model.ts),
+ * dispatching Claude (BYOK Anthropic, optionally via AI Gateway) and open
+ * (Workers AI) models. The raw `@anthropic-ai/sdk` single-provider loop this
+ * file used to run was removed. All of Coomander's DOMAIN logic — entitlement
+ * gate, single-thread persistence, tool actions in meta, token-usage logging,
+ * tag stripping — is preserved unchanged.
  *
  * ── WebSocket protocol (identical to the AppSeed template) ────────────────
  * Client → server (one JSON frame per user turn):
@@ -32,12 +42,19 @@
  *    non-enabled user gets a user-safe error frame and no model call. The web
  *    routes enforce the same gate server-side on the user-turn append.
  * 4. The thread interleaves Telegram pings (consecutive assistant turns), so
- *    history is merged alternating-role before the Anthropic call.
+ *    history is merged alternating-role before the model call.
  * 5. Tool actions are collected and persisted in the assistant turn's meta, and
  *    summed token usage rides the assistant append for cost logging.
  */
 
-import Anthropic from "@anthropic-ai/sdk";
+import {
+  streamText,
+  stepCountIs,
+  type ModelMessage,
+  type SystemModelMessage,
+  type ToolSet,
+} from "ai";
+import { getModel, DEFAULT_MODEL_ID } from "@coomander/core";
 import type { Env } from "./index";
 import {
   AgentContextUnavailableError,
@@ -49,6 +66,7 @@ import {
   appendMessage,
   type TurnUsage,
 } from "./persistence";
+import { resolveAgentModel, toAiSdkTools } from "./chat-model";
 import { makeCoomanderTool } from "./tools";
 import type { AgentTool, ToolContext } from "./types";
 
@@ -120,33 +138,20 @@ export function parseClientFrame(raw: string | ArrayBuffer): ClientFrame | null 
   return { type: "chat", conversationId, message: obj.message, userContext };
 }
 
-let _client: Anthropic | null = null;
-function getClient(env: Env): Anthropic {
-  if (!_client) {
-    // ANTHROPIC_API_KEY is a worker secret (.dev.vars in dev). Pass it
-    // explicitly — workerd has no process.env auto-resolution.
-    _client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
-  }
-  return _client;
-}
-
-/** Map app-level tools to the Anthropic tool definition shape. */
-function toAnthropicTools(tools: AgentTool[]): Anthropic.Tool[] {
-  return tools.map((t) => ({
-    name: t.name,
-    description: t.description,
-    input_schema: t.input_schema as Anthropic.Tool.InputSchema,
-  }));
+/** True when the agents worker is configured to route Anthropic through AI Gateway. */
+export function isAgentGatewayEnabled(env: Env): boolean {
+  return Boolean(env.CLOUDFLARE_ACCOUNT_ID && env.AI_GATEWAY_ID);
 }
 
 /**
  * Merge consecutive same-role turns and drop leading assistant turns so the
- * array is valid for the Anthropic API (alternating, starts with user). The
+ * array is valid as model messages (alternating, starts with user). The
  * Coomander thread interleaves Telegram pings, which produce consecutive
- * assistant rows.
+ * assistant rows. Returns AI SDK `ModelMessage[]` (text-only content), the shape
+ * `streamText` consumes.
  */
-export function mergeAlternating(turns: BufferTurn[]): Anthropic.MessageParam[] {
-  const merged: Anthropic.MessageParam[] = [];
+export function mergeAlternating(turns: BufferTurn[]): ModelMessage[] {
+  const merged: ModelMessage[] = [];
   for (const t of turns) {
     const last = merged[merged.length - 1];
     if (last && last.role === t.role) {
@@ -159,22 +164,12 @@ export function mergeAlternating(turns: BufferTurn[]): Anthropic.MessageParam[] 
   return merged;
 }
 
-function addUsage(total: TurnUsage, usage: Anthropic.Usage | undefined): void {
-  if (!usage) return;
-  total.input_tokens += usage.input_tokens ?? 0;
-  total.output_tokens += usage.output_tokens ?? 0;
-  total.cache_creation_input_tokens =
-    (total.cache_creation_input_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0);
-  total.cache_read_input_tokens =
-    (total.cache_read_input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0);
-}
-
 /**
  * Run one user turn end to end: fetch the Coomander context, gate on
  * entitlement, persist the user message, stream the model response (driving the
- * tool-use loop), persist the assistant message, and emit a final `done` frame.
- * All failures are reported to the client as a user-safe `error` frame; this
- * function never throws.
+ * tool-use loop via streamText's native multi-step tools), persist the assistant
+ * message, and emit a final `done` frame. All failures are reported to the
+ * client as a user-safe `error` frame; this function never throws.
  */
 export async function handleChatTurn(deps: ChatDeps, frame: ClientFrame): Promise<void> {
   const { env, userId, cookie, send } = deps;
@@ -238,93 +233,106 @@ export async function handleChatTurn(deps: ChatDeps, frame: ClientFrame): Promis
   }
   buffer.push({ role: "user", content: message });
 
-  // ── Run the model (tool-use loop) ────────────────────────────────────────
+  // ── Resolve the active model (catalog entry → AI SDK LanguageModel) ───────
+  // The agent-context already resolved the model id (admin switcher / per-user
+  // pref). Look the entry up in the SAME @coomander/core catalog the web used;
+  // an unknown id means catalogs drifted — fall back to the default so chat
+  // never hard-fails. resolveAgentModel dispatches the provider client.
+  const entry = getModel(context.model) ?? getModel(DEFAULT_MODEL_ID)!;
+  const { model, resolvedId } = resolveAgentModel(entry, env);
+  const isAnthropic = entry.provider === "anthropic";
+
+  // ── Build the model-facing message history ────────────────────────────────
+  // The thread can hold consecutive same-role turns (Telegram pings), so merge
+  // before the call; streamText's native multi-step tools append valid
+  // alternating blocks in place.
+  const messages: ModelMessage[] = mergeAlternating(buffer);
+
+  // ── Tool-use loop wiring ──────────────────────────────────────────────────
   const ctx: ToolContext = { userId, cookie, env, conversationId };
 
   // Coomander domain tools (web-served defs, web-executed handlers) + worker
-  // tools. Actions are collected for the assistant turn's meta.
+  // tools. Actions are collected for the assistant turn's meta — the onAction
+  // callback fires inside each tool's execute() while streamText runs the loop.
   const actions: string[] = [];
-  const tools: AgentTool[] = [
+  const allTools: AgentTool[] = [
     ...context.tools.map((t) => makeCoomanderTool(t, (a) => actions.push(a))),
     ...deps.tools,
   ];
-  const anthropicTools = toAnthropicTools(tools);
+  // Only attach tools when the active model handles them reliably (catalog
+  // `supportsTools`). Small Workers AI open models handle the AI-SDK tool
+  // protocol poorly — they refuse normal chat or leak raw tool-call JSON as text
+  // — so they run tool-free. Claude models keep their tools.
+  const aiTools: ToolSet = context.supportsTools ? toAiSdkTools(allTools, ctx) : {};
 
-  // The model-facing message history. The thread can hold consecutive same-role
-  // turns (Telegram pings), so merge before the first call; tool iterations
-  // then append valid alternating blocks in place.
-  const messages: Anthropic.MessageParam[] = mergeAlternating(buffer);
+  // Tag with cf-aig-metadata for per-user/model attribution in the gateway
+  // dashboard — only when routing through the gateway. Use the RESOLVED id so
+  // the metadata reflects what actually ran (after any fallback).
+  const headers = isAgentGatewayEnabled(env)
+    ? { "cf-aig-metadata": JSON.stringify({ userId, model: resolvedId }) }
+    : undefined;
 
   let assistantText = "";
   const usage: TurnUsage = { input_tokens: 0, output_tokens: 0 };
-  const client = getClient(env);
+
+  // Cache the (large, live-data) system prompt — mirror of coomanderChat's
+  // cache_control usage. The Anthropic provider reads cache_control from the
+  // SYSTEM MESSAGE's providerOptions, so for Claude we pass the prompt as a
+  // SystemModelMessage carrying anthropic.cacheControl. Prompt caching is an
+  // Anthropic-only feature, so Workers AI models get a plain system string.
+  const system: SystemModelMessage | string = isAnthropic
+    ? {
+        role: "system",
+        content: context.systemPrompt,
+        providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
+      }
+    : context.systemPrompt;
 
   try {
-    for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
-      const stream = client.messages.stream({
-        model: context.model,
-        max_tokens: context.maxTokens,
-        // Cache the (large, live-data) system prompt within the turn's tool
-        // iterations — mirror of coomanderChat's cache_control usage.
-        system: [
-          { type: "text", text: context.systemPrompt, cache_control: { type: "ephemeral" } },
-        ],
-        messages,
-        ...(anthropicTools.length > 0 ? { tools: anthropicTools } : {}),
-      });
+    const result = streamText({
+      model,
+      system,
+      messages,
+      maxOutputTokens: context.maxTokens,
+      ...(Object.keys(aiTools).length > 0
+        ? { tools: aiTools, stopWhen: stepCountIs(MAX_TOOL_ITERATIONS) }
+        : {}),
+      ...(headers ? { headers } : {}),
+    });
 
-      // Stream text deltas straight to the client as they arrive.
-      stream.on("text", (text) => {
-        assistantText += text;
-        send({ type: "token", text });
-      });
+    // Iterating textStream throws on a stream-stopping error (network/provider
+    // error) per the AI SDK contract, so the try/catch routes it to an error
+    // frame instead of silently ending an empty stream. Stream deltas straight
+    // to the client as they arrive AND accumulate the full text.
+    for await (const text of result.textStream) {
+      assistantText += text;
+      send({ type: "token", text });
+    }
 
-      const final = await stream.finalMessage();
-      addUsage(usage, final.usage);
-
-      // Preserve the full assistant content (text + tool_use blocks) so the
-      // next request carries the tool_use ids the tool_results refer to.
-      messages.push({ role: "assistant", content: final.content });
-
-      if (final.stop_reason !== "tool_use") {
-        break;
-      }
-
-      // Dispatch every tool_use block; collect tool_result blocks for the
-      // follow-up turn. A handler throw becomes an is_error tool_result so the
-      // model can recover gracefully rather than the whole turn failing.
-      const toolUses = final.content.filter(
-        (b): b is Anthropic.ToolUseBlock => b.type === "tool_use"
-      );
-      const toolResults: Anthropic.ToolResultBlockParam[] = [];
-      for (const use of toolUses) {
-        const tool = tools.find((t) => t.name === use.name);
-        if (!tool) {
-          toolResults.push({
-            type: "tool_result",
-            tool_use_id: use.id,
-            is_error: true,
-            content: `Unknown tool: ${use.name}`,
-          });
-          continue;
+    // ── Map AI SDK usage → Coomander's TurnUsage ────────────────────────────
+    // A tool-use turn makes MULTIPLE model calls (one per step). `result.usage`
+    // is only the FINAL step's usage, so summing it would under-count cost on
+    // any turn that called a tool — the old raw loop summed per iteration. Sum
+    // across ALL steps to preserve that accounting. inputTokens/outputTokens are
+    // the SDK's normalized counts; cache tokens are Anthropic-specific and
+    // surface per-step via providerMetadata.anthropic.
+    const steps = await result.steps;
+    for (const step of steps) {
+      usage.input_tokens += step.usage?.inputTokens ?? 0;
+      usage.output_tokens += step.usage?.outputTokens ?? 0;
+      const anthropicMeta = step.providerMetadata?.anthropic as
+        | { cacheCreationInputTokens?: number; cacheReadInputTokens?: number }
+        | undefined;
+      if (anthropicMeta) {
+        if (typeof anthropicMeta.cacheCreationInputTokens === "number") {
+          usage.cache_creation_input_tokens =
+            (usage.cache_creation_input_tokens ?? 0) + anthropicMeta.cacheCreationInputTokens;
         }
-        try {
-          const result = await tool.handler((use.input ?? {}) as Record<string, unknown>, ctx);
-          toolResults.push({
-            type: "tool_result",
-            tool_use_id: use.id,
-            content: typeof result === "string" ? result : JSON.stringify(result),
-          });
-        } catch (err) {
-          toolResults.push({
-            type: "tool_result",
-            tool_use_id: use.id,
-            is_error: true,
-            content: err instanceof Error ? err.message : String(err),
-          });
+        if (typeof anthropicMeta.cacheReadInputTokens === "number") {
+          usage.cache_read_input_tokens =
+            (usage.cache_read_input_tokens ?? 0) + anthropicMeta.cacheReadInputTokens;
         }
       }
-      messages.push({ role: "user", content: toolResults });
     }
   } catch (err) {
     console.error(`[AppAgent ${userId}] model stream error`, err);
