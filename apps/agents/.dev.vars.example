@@ -16,6 +16,25 @@ ANTHROPIC_API_KEY=sk-ant-...
 # CHAT_MODEL=claude-sonnet-4-6
 # CHAT_MAX_TOKENS=600
 
+# Cloudflare auth for the [ai] Workers AI binding (#203). `wrangler dev` cannot
+# run Workers AI inference in local miniflare, so it proxies the `AI` binding to
+# REMOTE Cloudflare — and it does that by deploying a temporary preview Worker,
+# so the token needs WORKERS SCRIPTS access. A Workers-AI-only token 403s on
+# edge-preview and `wrangler dev` never starts. Create one from the "Edit
+# Cloudflare Workers" template (Workers Scripts: Edit) and ADD "Workers AI: Read".
+# ‼️ In Docker dev the [ai] binding forces this remote proxy AT BOOT, so the
+# worker won't start without valid CF auth here EVEN for Claude-only chat.
+# (Non-Docker local dev can `wrangler login` via OAuth instead of a token.)
+# CLOUDFLARE_API_TOKEN=...        # "Edit Cloudflare Workers" template + Workers AI: Read
+# CLOUDFLARE_ACCOUNT_ID=1ed6d9117731a48060db43fabbf1a468
+
+# Optional — route Anthropic (Claude) through Cloudflare AI Gateway in dev for
+# usage/cost analytics. Set CLOUDFLARE_ACCOUNT_ID (above) + AI_GATEWAY_ID; add
+# AI_GATEWAY_TOKEN only if the gateway is "authenticated". Unset → direct
+# Anthropic. Prod uses wrangler.toml [env.production.vars] + a secret.
+# AI_GATEWAY_ID=coomander-gateway
+# AI_GATEWAY_TOKEN=...
+
 # Shared secret for server-to-server agent → web calls (scheduled wakes).
 # MUST match AGENTS_INTERNAL_SECRET in apps/web/.env.local.
 AGENTS_INTERNAL_SECRET=dev-agents-internal-secret-change-me

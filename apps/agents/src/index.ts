@@ -24,10 +24,26 @@ export type Env = {
   WEB_ORIGIN?: string;
   /** Anthropic API key — a worker secret (.dev.vars in dev). */
   ANTHROPIC_API_KEY?: string;
+  /**
+   * Workers AI binding (wrangler `[ai] binding = "AI"`). Lets the agent run open
+   * (Workers AI) models via `createWorkersAI({ binding: env.AI })`, mirroring the
+   * app worker (#203). Optional: when unset (e.g. a Workers AI model selected but
+   * no binding configured), the chat engine falls back to the default Claude.
+   */
+  AI?: Ai;
   /** Fallback Anthropic model id; the live value comes from agent-context. */
   CHAT_MODEL?: string;
   /** Fallback max tokens per response; the live value comes from agent-context. */
   CHAT_MAX_TOKENS?: string;
+  /**
+   * Cloudflare AI Gateway routing (optional; mirrors apps/web). When
+   * CLOUDFLARE_ACCOUNT_ID + AI_GATEWAY_ID are set, Anthropic calls route through
+   * the gateway for usage/cost analytics; unset → direct Anthropic.
+   */
+  CLOUDFLARE_ACCOUNT_ID?: string;
+  AI_GATEWAY_ID?: string;
+  /** Gateway auth token (`cf-aig-authorization`) for an authenticated gateway. */
+  AI_GATEWAY_TOKEN?: string;
   /**
    * Shared secret for server-to-server agent → web calls that happen without a
    * user cookie (scheduled wakes). Sent as `x-agents-internal-secret` to
