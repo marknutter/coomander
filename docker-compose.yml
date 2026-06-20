@@ -86,6 +86,13 @@ services:
     stdin_open: true
     volumes:
       - ./apps/agents:/app/apps/agents
+      # The agents chat engine imports the shared model catalog from
+      # @coomander/core (#203). The image's `npm ci` creates the workspace
+      # symlink (node_modules/@coomander/core -> ../packages/core), so the
+      # packages/core SOURCE must be mounted for wrangler's bundler to resolve
+      # it at runtime — without this the worker fails with
+      # `Could not resolve "@coomander/core"`.
+      - ./packages/core:/app/packages/core
       # scripts/dev.sh builds wrangler's --env-file list from whichever of
       # ../web/.env(.local) and .dev.vars exist — the web env file carries
       # ANTHROPIC_API_KEY (same key the POST chat path uses); .dev.vars carries
