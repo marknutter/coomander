@@ -310,23 +310,28 @@ export async function handleChatTurn(deps: ChatDeps, frame: ClientFrame): Promis
     }
 
     // ── Map AI SDK usage → Coomander's TurnUsage ────────────────────────────
-    // result.usage resolves after the stream. inputTokens/outputTokens are the
-    // SDK's normalized counts. Cache tokens are Anthropic-specific and surface
-    // via providerMetadata.anthropic; map them when present.
-    const aiUsage = await result.usage;
-    usage.input_tokens = aiUsage?.inputTokens ?? 0;
-    usage.output_tokens = aiUsage?.outputTokens ?? 0;
-
-    const providerMeta = await result.providerMetadata;
-    const anthropicMeta = providerMeta?.anthropic as
-      | { cacheCreationInputTokens?: number; cacheReadInputTokens?: number }
-      | undefined;
-    if (anthropicMeta) {
-      if (typeof anthropicMeta.cacheCreationInputTokens === "number") {
-        usage.cache_creation_input_tokens = anthropicMeta.cacheCreationInputTokens;
-      }
-      if (typeof anthropicMeta.cacheReadInputTokens === "number") {
-        usage.cache_read_input_tokens = anthropicMeta.cacheReadInputTokens;
+    // A tool-use turn makes MULTIPLE model calls (one per step). `result.usage`
+    // is only the FINAL step's usage, so summing it would under-count cost on
+    // any turn that called a tool — the old raw loop summed per iteration. Sum
+    // across ALL steps to preserve that accounting. inputTokens/outputTokens are
+    // the SDK's normalized counts; cache tokens are Anthropic-specific and
+    // surface per-step via providerMetadata.anthropic.
+    const steps = await result.steps;
+    for (const step of steps) {
+      usage.input_tokens += step.usage?.inputTokens ?? 0;
+      usage.output_tokens += step.usage?.outputTokens ?? 0;
+      const anthropicMeta = step.providerMetadata?.anthropic as
+        | { cacheCreationInputTokens?: number; cacheReadInputTokens?: number }
+        | undefined;
+      if (anthropicMeta) {
+        if (typeof anthropicMeta.cacheCreationInputTokens === "number") {
+          usage.cache_creation_input_tokens =
+            (usage.cache_creation_input_tokens ?? 0) + anthropicMeta.cacheCreationInputTokens;
+        }
+        if (typeof anthropicMeta.cacheReadInputTokens === "number") {
+          usage.cache_read_input_tokens =
+            (usage.cache_read_input_tokens ?? 0) + anthropicMeta.cacheReadInputTokens;
+        }
       }
     }
   } catch (err) {
