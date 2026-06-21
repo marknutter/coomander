@@ -77,10 +77,11 @@ routes = [
 WEB_ORIGIN = "https://coomander.com"
 # AI Gateway routing — usage/cost analytics for the agent chatbot (#203, mirrors
 # the app worker). AI_GATEWAY_TOKEN (authenticated gateway) is a SECRET set via
-# `wrangler secret put AI_GATEWAY_TOKEN --env production`. Leave AI_GATEWAY_ID
-# commented until a gateway exists → direct Anthropic.
+# `wrangler secret put AI_GATEWAY_TOKEN --env production`. The coomander-gateway
+# (unauthenticated, caching off) routes Claude through Cloudflare AI Gateway for
+# usage/cost analytics (#203). Dev (top-level [vars]) stays direct.
 CLOUDFLARE_ACCOUNT_ID = "1ed6d9117731a48060db43fabbf1a468"
-# AI_GATEWAY_ID = "coomander-gateway"
+AI_GATEWAY_ID = "coomander-gateway"
 
 # Service binding agents → app worker. Session validation + persistence + the
 # internal-secret routes go through this, never a public HTTP round-trip.
