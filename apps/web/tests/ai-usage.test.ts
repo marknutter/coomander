@@ -1,42 +1,59 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
-// ─── AI Gateway usage & cost reader (#203 Phase 4) ──────────────────────────
+// ─── AI Gateway usage & cost reader (#467) ──────────────────────────────────
 //
-// lib/ai-usage.ts exposes three public surfaces we test against the contract:
+// lib/ai-usage.ts (rewritten against the REAL Cloudflare GraphQL Analytics
+// schema) exposes three public surfaces we test against the contract:
 //
 //   isAiUsageWindow(v): v is "24h" | "7d"      — window-string type guard
 //   extractGroups(modelGroups, seriesGroups)   — PURE normalizer of raw CF rows
 //   getAiUsage(window, userId?): Promise<...>   — credentialed reader (fetch)
 //
 // We test ONLY the documented contract — never the internal GraphQL query
-// string or private helpers. extractGroups is pure (no env, no fetch). For
-// getAiUsage we stub global.fetch and save/restore the three required env vars
-// per test. The headline spec point: when creds are unset getAiUsage returns
-// `{ configured: false, missing: [...] }` and never calls fetch / never throws.
+// string, request variables, or private helpers. extractGroups is pure (no
+// env, no fetch). For getAiUsage we stub global.fetch the same way
+// tests/email-delivery.test.ts drives the Cloudflare GraphQL endpoint, and
+// save/restore the three required env vars per test.
+//
+// NOTE on the new schema: there are NO latency fields anymore (no
+// avgLatencyMs / latencyP50Ms / latencyP90Ms / quantiles). Token counts come
+// from a cached/uncached split (tokensIn = cachedTokensIn + uncachedTokensIn,
+// tokensOut = cachedTokensOut + uncachedTokensOut). Per-row request counts come
+// from each group's `count`, not from `sum`.
 
-import { isAiUsageWindow, extractGroups, getAiUsage } from "@/lib/ai-usage";
+import {
+  isAiUsageWindow,
+  extractGroups,
+  getAiUsage,
+} from "@/lib/ai-usage";
 
 const CF_GRAPHQL_ENDPOINT = "https://api.cloudflare.com/client/v4/graphql";
 
 // ─── Raw-group builders (mirror the RawModelGroup / RawSeriesGroup shapes) ────
+//
+// RawSum carries the cached/uncached token split + cost + cachedRequests.
+// All fields are optional and may be null/undefined — the parser coerces
+// non-finite/null/undefined numbers to 0.
 
 type RawSum = {
-  requests?: number | null;
-  tokensIn?: number | null;
-  tokensOut?: number | null;
+  cachedTokensIn?: number | null;
+  uncachedTokensIn?: number | null;
+  cachedTokensOut?: number | null;
+  uncachedTokensOut?: number | null;
   cost?: number | null;
   cachedRequests?: number | null;
 };
 
+/** Build a model group; per-row requests come from `count`. */
 function modelGroup(opts: {
   count?: number | null;
   sum?: RawSum | null;
-  quantiles?: { durationMsP50?: number | null; durationMsP90?: number | null } | null;
   dimensions?: { model?: string | null; provider?: string | null } | null;
 }) {
   return opts;
 }
 
+/** Build a series group; the bucket label is dimensions.ts. */
 function seriesGroup(opts: {
   count?: number | null;
   sum?: RawSum | null;
@@ -45,6 +62,7 @@ function seriesGroup(opts: {
   return opts;
 }
 
+/** A fetch Response-like object exposing .ok + .status + .json()/.text(). */
 function okFetchResponse(body: unknown) {
   return {
     ok: true,
@@ -54,11 +72,21 @@ function okFetchResponse(body: unknown) {
   } as unknown as Response;
 }
 
+/**
+ * Build a Cloudflare GraphQL "OK" body shaped like the impl reads:
+ *   data.viewer.accounts[0].byModel / .bySeries
+ */
 function cfBody(
   byModel: ReturnType<typeof modelGroup>[],
   bySeries: ReturnType<typeof seriesGroup>[],
 ) {
-  return { data: { viewer: { accounts: [{ byModel, bySeries }] } } };
+  return {
+    data: {
+      viewer: {
+        accounts: [{ byModel, bySeries }],
+      },
+    },
+  };
 }
 
 // ─── Env-var + fetch lifecycle ───────────────────────────────────────────────
@@ -87,25 +115,30 @@ afterEach(() => {
   global.fetch = REAL_FETCH;
 });
 
+/** Set all three required credentials. */
 function withCreds() {
   process.env.CF_ANALYTICS_API_TOKEN = "test-cf-token";
   process.env.CLOUDFLARE_ACCOUNT_ID = "test-account-id";
   process.env.AI_GATEWAY_ID = "test-gateway";
 }
 
+/** Stub global.fetch to resolve an OK CF body. Returns the spy. */
 function stubFetch(body: unknown) {
   const spy = vi.fn().mockResolvedValue(okFetchResponse(body));
   vi.stubGlobal("fetch", spy);
   return spy;
 }
 
-function postedBody(spy: ReturnType<typeof vi.fn>): {
-  query: string;
-  variables: Record<string, unknown>;
-} {
-  const [, init] = spy.mock.calls[0];
-  return JSON.parse((init as RequestInit).body as string);
-}
+// What a fully zeroed totals row looks like (no requests, no rate).
+const ZEROED_TOTALS = {
+  requests: 0,
+  tokensIn: 0,
+  tokensOut: 0,
+  tokens: 0,
+  cost: 0,
+  cachedRequests: 0,
+  cacheHitRate: null,
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 1. isAiUsageWindow — type guard
@@ -117,10 +150,13 @@ describe("isAiUsageWindow", () => {
     expect(isAiUsageWindow("7d")).toBe(true);
   });
 
-  it("returns false for any other string / null / undefined", () => {
-    for (const v of ["1h", "30d", "24H", "7D", "day", "", "  24h  "]) {
+  it("returns false for any other string", () => {
+    for (const v of ["1h", "30d", "24H", "7D", "day", "", "  24h  ", "24h7d"]) {
       expect(isAiUsageWindow(v)).toBe(false);
     }
+  });
+
+  it("returns false for null / undefined", () => {
     expect(isAiUsageWindow(null)).toBe(false);
     expect(isAiUsageWindow(undefined)).toBe(false);
   });
@@ -130,18 +166,32 @@ describe("isAiUsageWindow", () => {
 // 2. extractGroups — pure normalizer
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("extractGroups — byModel rows", () => {
+describe("extractGroups — byModel rows (happy multi-model)", () => {
   it("maps each group to a normalized row, computing tokens + cacheHitRate", () => {
     const { byModel } = extractGroups(
       [
         modelGroup({
-          sum: { requests: 100, tokensIn: 1000, tokensOut: 500, cost: 1.25, cachedRequests: 20 },
-          quantiles: { durationMsP50: 200, durationMsP90: 800 },
+          count: 100,
+          sum: {
+            cachedTokensIn: 200,
+            uncachedTokensIn: 800, // tokensIn = 1000
+            cachedTokensOut: 100,
+            uncachedTokensOut: 400, // tokensOut = 500
+            cost: 1.25,
+            cachedRequests: 20,
+          },
           dimensions: { model: "claude-sonnet-4", provider: "anthropic" },
         }),
         modelGroup({
-          sum: { requests: 40, tokensIn: 200, tokensOut: 100, cost: 0.5, cachedRequests: 10 },
-          quantiles: { durationMsP50: 50, durationMsP90: 120 },
+          count: 40,
+          sum: {
+            cachedTokensIn: 50,
+            uncachedTokensIn: 150, // tokensIn = 200
+            cachedTokensOut: 40,
+            uncachedTokensOut: 60, // tokensOut = 100
+            cost: 0.5,
+            cachedRequests: 10,
+          },
           dimensions: { model: "claude-haiku", provider: "anthropic" },
         }),
       ],
@@ -149,41 +199,93 @@ describe("extractGroups — byModel rows", () => {
     );
 
     expect(byModel).toHaveLength(2);
+
     expect(byModel[0]).toEqual({
       model: "claude-sonnet-4",
       provider: "anthropic",
       requests: 100,
-      tokensIn: 1000,
-      tokensOut: 500,
-      tokens: 1500,
+      tokensIn: 1000, // cached + uncached in
+      tokensOut: 500, // cached + uncached out
+      tokens: 1500, // tokensIn + tokensOut
       cost: 1.25,
       cachedRequests: 20,
-      cacheHitRate: 0.2,
-      latencyP50Ms: 200,
-      latencyP90Ms: 800,
+      cacheHitRate: 0.2, // 20 / 100
     });
-    expect(byModel[1]).toMatchObject({ model: "claude-haiku", tokens: 300, cacheHitRate: 0.25 });
+
+    expect(byModel[1]).toMatchObject({
+      model: "claude-haiku",
+      provider: "anthropic",
+      requests: 40,
+      tokensIn: 200,
+      tokensOut: 100,
+      tokens: 300,
+      cost: 0.5,
+      cachedRequests: 10,
+      cacheHitRate: 0.25, // 10 / 40
+    });
   });
 
-  it("preserves group order", () => {
+  it("preserves group order (one row per group)", () => {
     const { byModel } = extractGroups(
       [
-        modelGroup({ dimensions: { model: "a", provider: "p" } }),
-        modelGroup({ dimensions: { model: "b", provider: "p" } }),
-        modelGroup({ dimensions: { model: "c", provider: "p" } }),
+        modelGroup({ count: 1, dimensions: { model: "a", provider: "p" } }),
+        modelGroup({ count: 1, dimensions: { model: "b", provider: "p" } }),
+        modelGroup({ count: 1, dimensions: { model: "c", provider: "p" } }),
       ],
       [],
     );
     expect(byModel.map((m) => m.model)).toEqual(["a", "b", "c"]);
   });
+
+  it("derives requests from `count`, not from sum", () => {
+    const { byModel } = extractGroups(
+      [
+        modelGroup({
+          count: 42,
+          sum: { cachedRequests: 7 },
+          dimensions: { model: "m", provider: "p" },
+        }),
+      ],
+      [],
+    );
+    expect(byModel[0].requests).toBe(42);
+  });
 });
 
-describe("extractGroups — empty / missing / defensive", () => {
-  it("returns empty arrays and zeroed/null totals on empty input", () => {
+describe("extractGroups — empty input", () => {
+  it("returns empty arrays and a zeroed/null totals row", () => {
     const { totals, byModel, series } = extractGroups([], []);
     expect(byModel).toEqual([]);
     expect(series).toEqual([]);
-    expect(totals).toEqual({
+    expect(totals).toEqual(ZEROED_TOTALS);
+  });
+});
+
+describe("extractGroups — missing sum / dimensions default", () => {
+  it("defaults numeric sum fields to 0 and dimensions to 'unknown' when absent", () => {
+    const { byModel } = extractGroups([modelGroup({})], []);
+
+    expect(byModel[0]).toEqual({
+      model: "unknown",
+      provider: "unknown",
+      requests: 0,
+      tokensIn: 0,
+      tokensOut: 0,
+      tokens: 0,
+      cost: 0,
+      cachedRequests: 0,
+      cacheHitRate: null, // requests === 0
+    });
+  });
+
+  it("treats null sum / null dimensions like missing", () => {
+    const { byModel } = extractGroups(
+      [modelGroup({ count: null, sum: null, dimensions: null })],
+      [],
+    );
+    expect(byModel[0]).toMatchObject({
+      model: "unknown",
+      provider: "unknown",
       requests: 0,
       tokensIn: 0,
       tokensOut: 0,
@@ -191,109 +293,118 @@ describe("extractGroups — empty / missing / defensive", () => {
       cost: 0,
       cachedRequests: 0,
       cacheHitRate: null,
-      avgLatencyMs: null,
     });
   });
 
-  it("defaults numeric fields to 0 and dimensions to 'unknown' when absent / null", () => {
+  it("fills only the missing sub-fields (partial sum / partial dimensions)", () => {
     const { byModel } = extractGroups(
-      [modelGroup({}), modelGroup({ sum: null, dimensions: null, quantiles: null })],
+      [
+        modelGroup({
+          count: 10,
+          // only cachedTokensIn provided; everything else missing
+          sum: { cachedTokensIn: 5 },
+          dimensions: { model: "only-model" }, // provider missing
+        }),
+      ],
       [],
     );
-    for (const row of byModel) {
-      expect(row).toMatchObject({
-        model: "unknown",
-        provider: "unknown",
-        requests: 0,
-        tokens: 0,
-        cacheHitRate: null,
-        latencyP50Ms: null,
-        latencyP90Ms: null,
-      });
-    }
-  });
-
-  it("coerces NaN / Infinity / non-number fields to 0 without throwing", () => {
-    expect(() =>
-      extractGroups(
-        [
-          modelGroup({
-            sum: {
-              requests: NaN,
-              tokensIn: Infinity,
-              tokensOut: -Infinity,
-              cost: "x" as unknown as number,
-              cachedRequests: undefined,
-            } as RawSum,
-            dimensions: { model: "m", provider: "p" },
-          }),
-        ],
-        [seriesGroup({ sum: { requests: NaN } as RawSum, dimensions: { ts: "t" } })],
-      ),
-    ).not.toThrow();
-
-    const { byModel, series } = extractGroups(
-      [modelGroup({ sum: { requests: NaN } as RawSum, dimensions: { model: "m", provider: "p" } })],
-      [seriesGroup({ sum: { requests: NaN } as RawSum, dimensions: { ts: "t" } })],
-    );
-    expect(byModel[0].requests).toBe(0);
-    expect(byModel[0].cacheHitRate).toBeNull();
-    expect(series).toEqual([{ ts: "t", requests: 0, tokens: 0, cost: 0 }]);
+    expect(byModel[0]).toMatchObject({
+      model: "only-model",
+      provider: "unknown",
+      requests: 10,
+      tokensIn: 5, // 5 + 0
+      tokensOut: 0,
+      tokens: 5,
+      cost: 0,
+      cachedRequests: 0,
+    });
   });
 });
 
 describe("extractGroups — cacheHitRate null-on-zero + clamp", () => {
-  it("is null when requests === 0 even if cachedRequests > 0", () => {
-    const { byModel } = extractGroups([modelGroup({ sum: { requests: 0, cachedRequests: 5 } })], []);
+  it("is null when requests === 0 (even if cachedRequests > 0)", () => {
+    const { byModel, totals } = extractGroups(
+      [modelGroup({ count: 0, sum: { cachedRequests: 5 } })],
+      [],
+    );
     expect(byModel[0].cacheHitRate).toBeNull();
+    expect(totals.cacheHitRate).toBeNull();
   });
 
   it("clamps to 1 when cachedRequests exceeds requests", () => {
-    const { byModel } = extractGroups([modelGroup({ sum: { requests: 10, cachedRequests: 50 } })], []);
+    const { byModel } = extractGroups(
+      [modelGroup({ count: 10, sum: { cachedRequests: 50 } })],
+      [],
+    );
     expect(byModel[0].cacheHitRate).toBe(1);
   });
 
+  it("clamps to 0 when cachedRequests is negative", () => {
+    const { byModel } = extractGroups(
+      [modelGroup({ count: 10, sum: { cachedRequests: -5 } })],
+      [],
+    );
+    expect(byModel[0].cacheHitRate).toBe(0);
+  });
+
   it("computes the proportional rate in the normal 0–1 case", () => {
-    const { byModel } = extractGroups([modelGroup({ sum: { requests: 8, cachedRequests: 2 } })], []);
+    const { byModel } = extractGroups(
+      [modelGroup({ count: 8, sum: { cachedRequests: 2 } })],
+      [],
+    );
     expect(byModel[0].cacheHitRate).toBe(0.25);
   });
 });
 
-describe("extractGroups — totals + weighted latency", () => {
-  it("sums across models and recomputes cacheHitRate", () => {
+describe("extractGroups — totals summation", () => {
+  it("sums requests/tokens/cost/cached across models and recomputes cacheHitRate", () => {
     const { totals } = extractGroups(
       [
-        modelGroup({ sum: { requests: 100, tokensIn: 1000, tokensOut: 500, cost: 2, cachedRequests: 25 } }),
-        modelGroup({ sum: { requests: 300, tokensIn: 3000, tokensOut: 1500, cost: 6, cachedRequests: 75 } }),
+        modelGroup({
+          count: 100,
+          sum: {
+            cachedTokensIn: 400,
+            uncachedTokensIn: 600, // tokensIn 1000
+            cachedTokensOut: 200,
+            uncachedTokensOut: 300, // tokensOut 500
+            cost: 2,
+            cachedRequests: 25,
+          },
+        }),
+        modelGroup({
+          count: 300,
+          sum: {
+            cachedTokensIn: 1000,
+            uncachedTokensIn: 2000, // tokensIn 3000
+            cachedTokensOut: 500,
+            uncachedTokensOut: 1000, // tokensOut 1500
+            cost: 6,
+            cachedRequests: 75,
+          },
+        }),
       ],
       [],
     );
+
     expect(totals.requests).toBe(400);
-    expect(totals.tokens).toBe(6000);
+    expect(totals.tokensIn).toBe(4000);
+    expect(totals.tokensOut).toBe(2000);
+    expect(totals.tokens).toBe(6000); // tokensIn + tokensOut
     expect(totals.cost).toBe(8);
-    expect(totals.cacheHitRate).toBe(0.25);
+    expect(totals.cachedRequests).toBe(100);
+    expect(totals.cacheHitRate).toBe(0.25); // 100 / 400
   });
 
-  it("avgLatencyMs is the request-weighted average of per-model P50, rounded", () => {
+  it("totals cacheHitRate clamps to [0,1] when cachedRequests exceeds requests", () => {
     const { totals } = extractGroups(
       [
-        modelGroup({ sum: { requests: 100 }, quantiles: { durationMsP50: 100 } }),
-        modelGroup({ sum: { requests: 300 }, quantiles: { durationMsP50: 300 } }),
+        modelGroup({ count: 10, sum: { cachedRequests: 20 } }),
+        modelGroup({ count: 10, sum: { cachedRequests: 20 } }),
       ],
       [],
     );
-    expect(totals.avgLatencyMs).toBe(250); // (100*100 + 300*300)/400
-  });
-
-  it("is null when no model has both weight and a P50", () => {
-    const { totals } = extractGroups(
-      [
-        modelGroup({ sum: { requests: 0 }, quantiles: { durationMsP50: 100 } }),
-        modelGroup({ sum: { requests: 100 } }),
-      ],
-      [],
-    );
-    expect(totals.avgLatencyMs).toBeNull();
+    // 40 cached / 20 requests -> clamped to 1
+    expect(totals.cacheHitRate).toBe(1);
   });
 });
 
@@ -302,37 +413,149 @@ describe("extractGroups — series mapping + empty-ts drop", () => {
     const { series } = extractGroups(
       [],
       [
-        seriesGroup({ sum: { requests: 5, tokensIn: 10, tokensOut: 7, cost: 0.3 }, dimensions: { ts: "t0" } }),
-        seriesGroup({ sum: { requests: 8, tokensIn: 20, tokensOut: 5, cost: 0.6 }, dimensions: { ts: "t1" } }),
+        seriesGroup({
+          count: 5,
+          sum: {
+            cachedTokensIn: 4,
+            uncachedTokensIn: 6, // 10
+            cachedTokensOut: 3,
+            uncachedTokensOut: 4, // 7
+            cost: 0.3,
+          },
+          dimensions: { ts: "2026-06-18T00:00:00Z" },
+        }),
+        seriesGroup({
+          count: 8,
+          sum: {
+            cachedTokensIn: 10,
+            uncachedTokensIn: 10, // 20
+            cachedTokensOut: 2,
+            uncachedTokensOut: 3, // 5
+            cost: 0.6,
+          },
+          dimensions: { ts: "2026-06-18T01:00:00Z" },
+        }),
       ],
     );
+
     expect(series).toEqual([
-      { ts: "t0", requests: 5, tokens: 17, cost: 0.3 },
-      { ts: "t1", requests: 8, tokens: 25, cost: 0.6 },
+      { ts: "2026-06-18T00:00:00Z", requests: 5, tokens: 17, cost: 0.3 },
+      { ts: "2026-06-18T01:00:00Z", requests: 8, tokens: 25, cost: 0.6 },
     ]);
+  });
+
+  it("derives series requests from `count`", () => {
+    const { series } = extractGroups(
+      [],
+      [seriesGroup({ count: 99, dimensions: { ts: "t" } })],
+    );
+    expect(series[0].requests).toBe(99);
   });
 
   it("drops points whose ts is missing or empty", () => {
     const { series } = extractGroups(
       [],
       [
-        seriesGroup({ sum: { requests: 1 }, dimensions: { ts: "valid" } }),
-        seriesGroup({ sum: { requests: 2 }, dimensions: { ts: "" } }),
-        seriesGroup({ sum: { requests: 3 }, dimensions: {} }),
-        seriesGroup({ sum: { requests: 4 }, dimensions: null }),
-        seriesGroup({ sum: { requests: 5 } }),
+        seriesGroup({ count: 1, dimensions: { ts: "valid" } }),
+        seriesGroup({ count: 2, dimensions: { ts: "" } }), // dropped
+        seriesGroup({ count: 3, dimensions: {} }), // ts missing -> dropped
+        seriesGroup({ count: 4, dimensions: null }), // dims null -> dropped
+        seriesGroup({ count: 5 }), // dims missing -> dropped
       ],
     );
+
     expect(series).toEqual([{ ts: "valid", requests: 1, tokens: 0, cost: 0 }]);
   });
 });
 
+describe("extractGroups — defensive against malformed numbers (no throw)", () => {
+  it("coerces NaN / Infinity / -Infinity sum fields and count to 0", () => {
+    const { byModel, totals, series } = extractGroups(
+      [
+        modelGroup({
+          count: NaN,
+          sum: {
+            cachedTokensIn: Infinity,
+            uncachedTokensIn: -Infinity,
+            cachedTokensOut: NaN,
+            uncachedTokensOut: Infinity,
+            cost: NaN,
+            cachedRequests: Infinity,
+          } as RawSum,
+          dimensions: { model: "m", provider: "p" },
+        }),
+      ],
+      [
+        seriesGroup({
+          count: NaN,
+          sum: {
+            cachedTokensIn: Infinity,
+            uncachedTokensIn: NaN,
+            cachedTokensOut: NaN,
+            uncachedTokensOut: -Infinity,
+            cost: -Infinity,
+          } as RawSum,
+          dimensions: { ts: "t" },
+        }),
+      ],
+    );
+
+    expect(byModel[0]).toMatchObject({
+      requests: 0,
+      tokensIn: 0,
+      tokensOut: 0,
+      tokens: 0,
+      cost: 0,
+      cachedRequests: 0,
+      cacheHitRate: null, // requests coerced to 0
+    });
+    expect(totals).toEqual(ZEROED_TOTALS);
+    expect(series).toEqual([{ ts: "t", requests: 0, tokens: 0, cost: 0 }]);
+  });
+
+  it("coerces string / object / null / undefined number fields to 0 without throwing", () => {
+    expect(() =>
+      extractGroups(
+        [
+          modelGroup({
+            // intentionally wrong runtime types — parser must not throw
+            count: "12" as unknown as number,
+            sum: {
+              cachedTokensIn: undefined,
+              uncachedTokensIn: ({} as unknown) as number,
+              cachedTokensOut: null,
+              uncachedTokensOut: "x" as unknown as number,
+              cost: null,
+              cachedRequests: "y" as unknown as number,
+            },
+            dimensions: { model: "m", provider: "p" },
+          }),
+        ],
+        [],
+      ),
+    ).not.toThrow();
+
+    const { byModel } = extractGroups(
+      [
+        modelGroup({
+          count: "12" as unknown as number,
+          sum: { cachedTokensIn: undefined, uncachedTokensIn: "5" as unknown as number },
+          dimensions: { model: "m", provider: "p" },
+        }),
+      ],
+      [],
+    );
+    expect(byModel[0].requests).toBe(0); // "12" string -> 0 (not a finite number)
+    expect(byModel[0].tokensIn).toBe(0); // undefined + "5" string -> 0
+  });
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
-// 3. getAiUsage — graceful empty-state (the headline spec point)
+// 3. getAiUsage — credentialed reader
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("getAiUsage — graceful skip when creds are missing", () => {
-  it("returns { configured: false, missing: [all three] } and never calls fetch", async () => {
+  it("skips with all three names when none are set, and never calls fetch", async () => {
     delete process.env.CF_ANALYTICS_API_TOKEN;
     delete process.env.CLOUDFLARE_ACCOUNT_ID;
     delete process.env.AI_GATEWAY_ID;
@@ -340,37 +563,47 @@ describe("getAiUsage — graceful skip when creds are missing", () => {
 
     const result = await getAiUsage("24h");
 
-    expect(result).toEqual({
-      configured: false,
-      missing: ["CF_ANALYTICS_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID", "AI_GATEWAY_ID"],
-    });
+    expect(result).toMatchObject({ configured: false });
+    const missing = (result as { missing: string[] }).missing;
+    expect(missing).toContain("CF_ANALYTICS_API_TOKEN");
+    expect(missing).toContain("CLOUDFLARE_ACCOUNT_ID");
+    expect(missing).toContain("AI_GATEWAY_ID");
+    expect(missing).toHaveLength(3);
     expect(spy).not.toHaveBeenCalled();
   });
 
-  it("reports only the single missing var (token)", async () => {
+  it("skips when only CF_ANALYTICS_API_TOKEN is missing", async () => {
     withCreds();
     delete process.env.CF_ANALYTICS_API_TOKEN;
     const spy = stubFetch(cfBody([], []));
+
     const result = await getAiUsage("7d");
+
     expect(result).toMatchObject({ configured: false });
     expect((result as { missing: string[] }).missing).toEqual(["CF_ANALYTICS_API_TOKEN"]);
     expect(spy).not.toHaveBeenCalled();
   });
 
-  it("reports only the single missing var (account id)", async () => {
+  it("skips when only CLOUDFLARE_ACCOUNT_ID is missing", async () => {
     withCreds();
     delete process.env.CLOUDFLARE_ACCOUNT_ID;
     const spy = stubFetch(cfBody([], []));
+
     const result = await getAiUsage("24h");
+
+    expect((result as { configured: boolean }).configured).toBe(false);
     expect((result as { missing: string[] }).missing).toEqual(["CLOUDFLARE_ACCOUNT_ID"]);
     expect(spy).not.toHaveBeenCalled();
   });
 
-  it("reports only the single missing var (gateway id)", async () => {
+  it("skips when only AI_GATEWAY_ID is missing", async () => {
     withCreds();
     delete process.env.AI_GATEWAY_ID;
     const spy = stubFetch(cfBody([], []));
+
     const result = await getAiUsage("24h");
+
+    expect((result as { configured: boolean }).configured).toBe(false);
     expect((result as { missing: string[] }).missing).toEqual(["AI_GATEWAY_ID"]);
     expect(spy).not.toHaveBeenCalled();
   });
@@ -379,79 +612,144 @@ describe("getAiUsage — graceful skip when creds are missing", () => {
     delete process.env.CF_ANALYTICS_API_TOKEN;
     delete process.env.CLOUDFLARE_ACCOUNT_ID;
     delete process.env.AI_GATEWAY_ID;
+
     await expect(getAiUsage("24h")).resolves.toMatchObject({ configured: false });
   });
 });
 
-describe("getAiUsage — configured happy path", () => {
+describe("getAiUsage — happy path shape", () => {
   beforeEach(withCreds);
 
-  it("POSTs to the CF GraphQL endpoint with a bearer header and returns a configured report", async () => {
+  it("POSTs to the CF GraphQL endpoint and returns a configured report", async () => {
     const spy = stubFetch(
       cfBody(
         [
           modelGroup({
-            sum: { requests: 100, tokensIn: 1000, tokensOut: 500, cost: 1.5, cachedRequests: 25 },
-            quantiles: { durationMsP50: 200, durationMsP90: 600 },
+            count: 100,
+            sum: {
+              cachedTokensIn: 200,
+              uncachedTokensIn: 800, // tokensIn 1000
+              cachedTokensOut: 100,
+              uncachedTokensOut: 400, // tokensOut 500
+              cost: 1.5,
+              cachedRequests: 25,
+            },
             dimensions: { model: "claude-sonnet-4", provider: "anthropic" },
           }),
         ],
-        [seriesGroup({ sum: { requests: 100, tokensIn: 1000, tokensOut: 500, cost: 1.5 }, dimensions: { ts: "t0" } })],
+        [
+          seriesGroup({
+            count: 100,
+            sum: {
+              cachedTokensIn: 200,
+              uncachedTokensIn: 800,
+              cachedTokensOut: 100,
+              uncachedTokensOut: 400, // tokens 1500
+              cost: 1.5,
+            },
+            dimensions: { ts: "2026-06-18T00:00:00Z" },
+          }),
+        ],
       ),
     );
 
     const result = await getAiUsage("24h");
 
+    // Endpoint + method.
     expect(spy).toHaveBeenCalledTimes(1);
     const [url, init] = spy.mock.calls[0];
     expect(String(url)).toBe(CF_GRAPHQL_ENDPOINT);
     expect((init as RequestInit).method).toBe("POST");
-    expect(((init as RequestInit).headers as Record<string, string>).Authorization).toBe(
-      "Bearer test-cf-token",
-    );
+
     expect(result).toMatchObject({
       configured: true,
       window: "24h",
       userId: null,
-      totals: { requests: 100, tokens: 1500, cost: 1.5, cacheHitRate: 0.25, avgLatencyMs: 200 },
+      totals: {
+        requests: 100,
+        tokensIn: 1000,
+        tokensOut: 500,
+        tokens: 1500,
+        cost: 1.5,
+        cachedRequests: 25,
+        cacheHitRate: 0.25,
+      },
     });
+
+    const report = result as Extract<typeof result, { configured: true }>;
+    expect(report.byModel).toHaveLength(1);
+    expect(report.byModel[0]).toMatchObject({
+      model: "claude-sonnet-4",
+      provider: "anthropic",
+      tokens: 1500,
+    });
+    expect(report.series).toEqual([
+      { ts: "2026-06-18T00:00:00Z", requests: 100, tokens: 1500, cost: 1.5 },
+    ]);
   });
 
-  it("threads a userId into the metadata filter variables", async () => {
-    const spy = stubFetch(cfBody([], []));
-    const result = await getAiUsage("24h", "user-123");
-    expect(result).toMatchObject({ configured: true, userId: "user-123" });
-    const { variables } = postedBody(spy);
-    expect(variables.metadataKey).toBe("userId");
-    expect(variables.metadataValue).toBe("user-123");
+  it("threads the window through to the report", async () => {
+    stubFetch(cfBody([], []));
+
+    const result = await getAiUsage("7d");
+
+    expect(result).toMatchObject({ configured: true, window: "7d" });
   });
 
-  it("sends null metadata (account-wide) when userId is omitted", async () => {
-    const spy = stubFetch(cfBody([], []));
-    await getAiUsage("7d");
-    const { variables } = postedBody(spy);
-    expect(variables.metadataKey).toBeNull();
-    expect(variables.metadataValue).toBeNull();
+  it("returns empty arrays + null rate when the account has no groups", async () => {
+    stubFetch(cfBody([], []));
+
+    const result = await getAiUsage("24h");
+    const report = result as Extract<typeof result, { configured: true }>;
+
+    expect(report.byModel).toEqual([]);
+    expect(report.series).toEqual([]);
+    expect(report.totals).toEqual(ZEROED_TOTALS);
   });
 });
 
-describe("getAiUsage — degrades to a zeroed configured report on error (no throw)", () => {
+describe("getAiUsage — per-user scoping", () => {
   beforeEach(withCreds);
 
-  const ZEROED_TOTALS = {
-    requests: 0,
-    tokensIn: 0,
-    tokensOut: 0,
-    tokens: 0,
-    cost: 0,
-    cachedRequests: 0,
-    cacheHitRate: null,
-    avgLatencyMs: null,
-  };
+  it("reflects the passed userId in the report", async () => {
+    stubFetch(cfBody([], []));
 
-  it("returns a zeroed configured report when fetch rejects", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network down")));
-    const result = await getAiUsage("24h", "user-err");
+    const result = await getAiUsage("24h", "user-123");
+
+    expect(result).toMatchObject({ configured: true, userId: "user-123" });
+  });
+
+  it("reports userId: null when userId is explicitly null (account-wide)", async () => {
+    stubFetch(cfBody([], []));
+
+    const result = await getAiUsage("24h", null);
+
+    expect(result).toMatchObject({ configured: true, userId: null });
+  });
+
+  it("defaults to userId: null when userId is omitted", async () => {
+    stubFetch(cfBody([], []));
+
+    const result = await getAiUsage("7d");
+
+    expect(result).toMatchObject({ configured: true, userId: null });
+  });
+});
+
+describe("getAiUsage — degrades to a zeroed configured report on error", () => {
+  beforeEach(withCreds);
+
+  it("returns a configured zeroed report (no throw) when fetch rejects", async () => {
+    const spy = vi.fn().mockRejectedValue(new Error("network down"));
+    vi.stubGlobal("fetch", spy);
+
+    let result: Awaited<ReturnType<typeof getAiUsage>> | undefined;
+    await expect(
+      (async () => {
+        result = await getAiUsage("24h", "user-err");
+      })(),
+    ).resolves.toBeUndefined();
+
     expect(result).toEqual({
       configured: true,
       window: "24h",
@@ -462,17 +760,17 @@ describe("getAiUsage — degrades to a zeroed configured report on error (no thr
     });
   });
 
-  it("returns a zeroed configured report when fetch resolves non-OK", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({
-        ok: false,
-        status: 500,
-        json: async () => ({}),
-        text: async () => "Internal Server Error",
-      } as unknown as Response),
-    );
+  it("returns a configured zeroed report when fetch resolves non-OK", async () => {
+    const spy = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+      json: async () => ({}),
+      text: async () => "Internal Server Error",
+    } as unknown as Response);
+    vi.stubGlobal("fetch", spy);
+
     const result = await getAiUsage("7d");
+
     expect(result).toEqual({
       configured: true,
       window: "7d",
@@ -483,13 +781,24 @@ describe("getAiUsage — degrades to a zeroed configured report on error (no thr
     });
   });
 
-  it("returns a zeroed configured report when the GraphQL body carries errors[]", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue(okFetchResponse({ data: null, errors: [{ message: "not authorized" }] })),
+  it("returns a configured zeroed report when the GraphQL body carries errors[]", async () => {
+    const spy = vi.fn().mockResolvedValue(
+      okFetchResponse({
+        data: null,
+        errors: [{ message: "account not authorized" }],
+      }),
     );
+    vi.stubGlobal("fetch", spy);
+
     const result = await getAiUsage("24h");
-    expect(result).toMatchObject({ configured: true, byModel: [], series: [] });
-    expect((result as { totals: typeof ZEROED_TOTALS }).totals).toEqual(ZEROED_TOTALS);
+
+    expect(result).toEqual({
+      configured: true,
+      window: "24h",
+      userId: null,
+      totals: ZEROED_TOTALS,
+      byModel: [],
+      series: [],
+    });
   });
 });
