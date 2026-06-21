@@ -17,7 +17,6 @@ interface Totals {
   cost: number;
   cachedRequests: number;
   cacheHitRate: number | null;
-  avgLatencyMs: number | null;
 }
 
 interface ByModel {
@@ -30,8 +29,6 @@ interface ByModel {
   cost: number;
   cachedRequests: number;
   cacheHitRate: number | null;
-  latencyP50Ms: number | null;
-  latencyP90Ms: number | null;
 }
 
 interface SeriesPoint {
@@ -74,10 +71,6 @@ function fmtCost(n: number): string {
   if (n === 0) return "$0.00";
   if (n < 0.01) return `$${n.toFixed(4)}`;
   return `$${n.toFixed(2)}`;
-}
-
-function fmtLatency(ms: number | null): string {
-  return ms === null ? "—" : `${Math.round(ms)} ms`;
 }
 
 function fmtPercent(rate: number | null): string {
@@ -216,7 +209,7 @@ export default function AiUsagePage() {
             </h2>
             <p className="max-w-md text-sm text-zinc-500 dark:text-zinc-400">
               Route AI traffic through a Cloudflare AI Gateway and grant an analytics
-              token to see per-model requests, tokens, cost, latency, and cache-hit
+              token to see per-model requests, tokens, cost, and cache-hit
               rate here — plus per-user attribution.
             </p>
             <div className="text-left text-xs text-zinc-500 dark:text-zinc-400 bg-zinc-50 dark:bg-zinc-800/50 rounded-lg px-4 py-3 mt-1">
@@ -258,9 +251,9 @@ export default function AiUsagePage() {
             />
             <MetricCard label="Cost" value={fmtCost(report.totals.cost)} />
             <MetricCard
-              label="Avg Latency"
-              value={fmtLatency(report.totals.avgLatencyMs)}
-              sub={`cache hit ${fmtPercent(report.totals.cacheHitRate)}`}
+              label="Cache Hit"
+              value={fmtPercent(report.totals.cacheHitRate)}
+              sub={`${fmtInt(report.totals.cachedRequests)} cached`}
             />
           </div>
 
@@ -305,18 +298,6 @@ export default function AiUsagePage() {
                   label: "Cache Hit",
                   align: "right",
                   render: (v) => fmtPercent(v as number | null),
-                },
-                {
-                  key: "latencyP50Ms",
-                  label: "p50",
-                  align: "right",
-                  render: (v) => fmtLatency(v as number | null),
-                },
-                {
-                  key: "latencyP90Ms",
-                  label: "p90",
-                  align: "right",
-                  render: (v) => fmtLatency(v as number | null),
                 },
               ]}
               rows={report.byModel as unknown as Record<string, unknown>[]}
