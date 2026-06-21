@@ -63,10 +63,10 @@ FLAG_COOMANDER_AGENTS_CHAT = "true"
 # usage/cost analytics + caching. AI_GATEWAY_TOKEN (authenticated gateway) is a
 # SECRET: `wrangler secret put AI_GATEWAY_TOKEN`. If AI_GATEWAY_ID is unset / the
 # token is missing, AI calls fall back to direct Anthropic — no behavior change.
-# Left commented so the default deploy routes direct; set it to enable the
-# /admin/ai-usage dashboard (which also needs CF_ANALYTICS_API_TOKEN + the
-# CLOUDFLARE_ACCOUNT_ID above, with the "Account Analytics: Read" grant).
-# AI_GATEWAY_ID = "coomander-gateway"
+# Set to the coomander-gateway so the /admin/ai-usage dashboard queries it
+# (also needs the CF_ANALYTICS_API_TOKEN secret + the CLOUDFLARE_ACCOUNT_ID
+# above, with the "Account Analytics: Read" grant).
+AI_GATEWAY_ID = "coomander-gateway"
 #
 # NOTE: the web worker intentionally has NO [ai] binding. Workers AI (if added
 # later) runs on the AGENTS worker (apps/agents), which would declare its own
