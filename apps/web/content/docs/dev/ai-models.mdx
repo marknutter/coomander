@@ -209,8 +209,9 @@ Anthropic provider `baseURL` at the gateway (note the trailing `/v1`, above).
 ## The `/admin/ai-usage` dashboard
 
 The in-app AI usage & cost dashboard (`/admin/ai-usage`) reads AI Gateway metrics
-(requests / tokens / cost / latency / cache-hit, per model + per user) from the
-Cloudflare GraphQL Analytics API. It requires `CF_ANALYTICS_API_TOKEN` (with
+(requests / tokens / cost / cache-hit, per model + per user) from the
+Cloudflare GraphQL Analytics API. (Request latency p50/p90 is not available —
+Cloudflare's AI Gateway analytics dataset has no `quantiles` field.) It requires `CF_ANALYTICS_API_TOKEN` (with
 **Account Analytics: Read**) + `CLOUDFLARE_ACCOUNT_ID` + `AI_GATEWAY_ID`. If any
 is unset, the dashboard shows a friendly empty-state.
 
