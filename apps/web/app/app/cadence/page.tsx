@@ -24,6 +24,15 @@ const CONTENT_STATES = ["drafted", "shot", "approved", "uploaded_to_edit", "edit
 const CADENCE_KINDS = ["daily", "weekly", "window", "daily_vlog_buffer"] as const;
 const PILLAR_KINDS = ["content", "wall", "procurement", "engagement", "admin"] as const;
 
+// Cadence-ping presets (nag frequency). Ordered least → most frequent; mirrors
+// NAG_FREQUENCIES / PRESET_SLOTS server-side. "off" silences all scheduled pings.
+const NAG_OPTIONS: { value: string; label: string; desc: string }[] = [
+  { value: "off", label: "Off", desc: "No scheduled pings. You can still chat anytime." },
+  { value: "light", label: "Light", desc: "Morning and evening only." },
+  { value: "moderate", label: "Moderate", desc: "Morning, midday, and evening." },
+  { value: "tight", label: "Tight", desc: "All four daily touchpoints (default)." },
+];
+
 type Json = Record<string, unknown>;
 
 // Minimal shapes (the API returns more; we read what we render).
@@ -77,6 +86,8 @@ export default function CoomanderPage() {
   const [bannerDismissed, setBannerDismissed] = useState(true);
   const [enabling, setEnabling] = useState(false);
   const [latestReviewWeek, setLatestReviewWeek] = useState<string | null>(null);
+  const [nagFrequency, setNagFrequency] = useState<string>("tight");
+  const [savingNag, setSavingNag] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -92,7 +103,9 @@ export default function CoomanderPage() {
       ]);
       setModel(t.model as TodayModel);
       setContent((c.content as ContentItem[]) ?? []);
-      setBannerDismissed(((s.settings as { defaultsBannerDismissedAt: number | null }).defaultsBannerDismissedAt) != null);
+      const settings = s.settings as { defaultsBannerDismissedAt: number | null; nagFrequency: string };
+      setBannerDismissed(settings.defaultsBannerDismissedAt != null);
+      setNagFrequency(settings.nagFrequency ?? "tight");
       const rev = lr.review as { week_ending: string } | null;
       setLatestReviewWeek(rev?.week_ending ?? null);
     } catch (e) {
@@ -113,6 +126,22 @@ export default function CoomanderPage() {
   const dismissBanner = async () => {
     setBannerDismissed(true);
     try { await api("PATCH", "/api/coomander/settings", { dismissBanner: true }); } catch { /* best effort */ }
+  };
+
+  const saveNagFrequency = async (value: string) => {
+    if (value === nagFrequency || savingNag) return;
+    const prev = nagFrequency;
+    setNagFrequency(value); // optimistic
+    setSavingNag(true);
+    try {
+      await api("PATCH", "/api/coomander/settings", { nagFrequency: value });
+      toast.success(value === "off" ? "Scheduled pings turned off" : `Cadence pings set to ${value}`);
+    } catch (e) {
+      setNagFrequency(prev); // revert on failure
+      toast.error((e as Error).message);
+    } finally {
+      setSavingNag(false);
+    }
   };
 
   const overallClass =
@@ -165,6 +194,38 @@ export default function CoomanderPage() {
               View latest weekly review ({latestReviewWeek}) →
             </Link>
           )}
+
+          {/* Cadence pings (nag frequency) */}
+          <Card title="Cadence pings">
+            <p className="text-sm text-gray-600 dark:text-gray-300 mb-3">
+              How often Coomander checks in over Telegram. Choose <strong>Off</strong> to pause scheduled pings — chat still works anytime.
+            </p>
+            <div className="space-y-2">
+              {NAG_OPTIONS.map((o) => {
+                const active = nagFrequency === o.value;
+                return (
+                  <button
+                    key={o.value}
+                    type="button"
+                    onClick={() => saveNagFrequency(o.value)}
+                    disabled={savingNag}
+                    aria-pressed={active}
+                    className={`w-full text-left rounded-lg border p-3 transition disabled:opacity-60 ${
+                      active
+                        ? "border-blue-500 bg-blue-50 dark:bg-blue-950/40 ring-1 ring-blue-500"
+                        : "border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-medium text-gray-900 dark:text-gray-100">{o.label}</span>
+                      {active && <span className="text-xs font-medium text-blue-600 dark:text-blue-300">Current</span>}
+                    </div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{o.desc}</div>
+                  </button>
+                );
+              })}
+            </div>
+          </Card>
 
           {/* Pillars + beats */}
           <Card title="Cadence">
