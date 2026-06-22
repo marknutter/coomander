@@ -17,10 +17,13 @@ import { getDb } from "@/lib/db";
 import { DEFAULT_TIMEZONE, todayLocal } from "./consistency";
 import { user as userT, coomanderSettings as settingsT } from "@/lib/schema";
 
-export type NagFrequency = "tight" | "moderate" | "light";
+// "off" fully silences scheduled pings (no slot fires); see PRESET_SLOTS /
+// planPing in agent.ts. It is opt-in — DEFAULT_NAG_FREQUENCY stays "tight".
+export type NagFrequency = "off" | "light" | "moderate" | "tight";
 export type PersonaMode = "light_companion" | "full_companion" | "operational";
 
-export const NAG_FREQUENCIES: NagFrequency[] = ["tight", "moderate", "light"];
+// Ordered least → most frequent (the cadence-pings UI renders them in this order).
+export const NAG_FREQUENCIES: NagFrequency[] = ["off", "light", "moderate", "tight"];
 export const PERSONA_MODES: PersonaMode[] = ["light_companion", "full_companion", "operational"];
 
 export const DEFAULT_NAG_FREQUENCY: NagFrequency = "tight";

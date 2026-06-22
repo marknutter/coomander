@@ -37,11 +37,12 @@ import { eq } from "drizzle-orm";
 
 const MODEL = process.env.COOMANDER_AGENT_MODEL || process.env.CHAT_MODEL || "claude-sonnet-4-6";
 
-/** Which slots each nag preset is allowed to fire. */
+/** Which slots each nag preset is allowed to fire. "off" fires nothing. */
 export const PRESET_SLOTS: Record<NagFrequency, Slot[]> = {
-  tight: ["morning", "midday", "check", "evening"],
-  moderate: ["morning", "midday", "evening"],
+  off: [],
   light: ["morning", "evening"],
+  moderate: ["morning", "midday", "evening"],
+  tight: ["morning", "midday", "check", "evening"],
 };
 
 export interface PlanPingInput {
@@ -60,12 +61,16 @@ export interface PingPlan {
  * Pure decision: should we ping for this slot, given the user's nag preset?
  *
  * Rules (see docs/strategy/coomander-direction.md § Nag frequency):
+ *   - "off" silences everything: no slot fires.
  *   - The slot must be in the preset's allowed set (light = morning+evening,
  *     moderate = morning+midday+evening, tight = all four incl. the extra check).
  *   - On a "bad" day the midday and check touchpoints are suppressed (morning
  *     and evening anchors still fire).
  */
 export function planPing(input: PlanPingInput): PingPlan {
+  if (input.nagFrequency === "off") {
+    return { send: false, reason: "pings are off" };
+  }
   const allowed = PRESET_SLOTS[input.nagFrequency] ?? PRESET_SLOTS.tight;
   if (!allowed.includes(input.slot)) {
     return { send: false, reason: `${input.slot} is not in the '${input.nagFrequency}' preset` };

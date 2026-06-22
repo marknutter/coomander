@@ -6,6 +6,7 @@ import {
   isValidPersonaMode,
   DEFAULT_NAG_FREQUENCY,
   DEFAULT_PERSONA_MODE,
+  NAG_FREQUENCIES,
 } from "@/lib/coomander/settings";
 
 describe("settings defaults", () => {
@@ -13,8 +14,24 @@ describe("settings defaults", () => {
     expect(DEFAULT_NAG_FREQUENCY).toBe("tight");
   });
 
+  it("DEFAULT_NAG_FREQUENCY is not 'off' (off is opt-in)", () => {
+    expect(DEFAULT_NAG_FREQUENCY).not.toBe("off");
+  });
+
   it("DEFAULT_PERSONA_MODE is 'light_companion'", () => {
     expect(DEFAULT_PERSONA_MODE).toBe("light_companion");
+  });
+});
+
+describe("NAG_FREQUENCIES", () => {
+  it("contains 'off'", () => {
+    expect(NAG_FREQUENCIES).toContain("off");
+  });
+
+  it("still contains light, moderate, and tight", () => {
+    expect(NAG_FREQUENCIES).toContain("light");
+    expect(NAG_FREQUENCIES).toContain("moderate");
+    expect(NAG_FREQUENCIES).toContain("tight");
   });
 });
 
@@ -23,6 +40,10 @@ describe("pickNagFrequency", () => {
     expect(pickNagFrequency({ nag_frequency: "tight" })).toBe("tight");
     expect(pickNagFrequency({ nag_frequency: "moderate" })).toBe("moderate");
     expect(pickNagFrequency({ nag_frequency: "light" })).toBe("light");
+  });
+
+  it("returns 'off' verbatim", () => {
+    expect(pickNagFrequency({ nag_frequency: "off" })).toBe("off");
   });
 
   it("falls back to default when row is undefined", () => {
@@ -71,6 +92,10 @@ describe("isValidNagFrequency", () => {
     expect(isValidNagFrequency("tight")).toBe(true);
     expect(isValidNagFrequency("moderate")).toBe(true);
     expect(isValidNagFrequency("light")).toBe(true);
+  });
+
+  it("true for 'off'", () => {
+    expect(isValidNagFrequency("off")).toBe(true);
   });
 
   it("false for invalid inputs", () => {
