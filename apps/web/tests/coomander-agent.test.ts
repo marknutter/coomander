@@ -2,13 +2,13 @@ import { describe, it, expect } from "vitest";
 import { planPing, PRESET_SLOTS } from "@/lib/coomander/agent";
 
 type Slot = "morning" | "midday" | "check" | "evening";
-type NagFrequency = "tight" | "moderate" | "light";
+type NagFrequency = "off" | "tight" | "moderate" | "light";
 
 const ALL_SLOTS: Slot[] = ["morning", "midday", "check", "evening"];
-const ALL_PRESETS: NagFrequency[] = ["tight", "moderate", "light"];
+const ALL_PRESETS: Exclude<NagFrequency, "off">[] = ["tight", "moderate", "light"];
 
 // Spec'd allowed-slot sets, declared here independently of the implementation.
-const ALLOWED: Record<NagFrequency, Slot[]> = {
+const ALLOWED: Record<Exclude<NagFrequency, "off">, Slot[]> = {
   tight: ["morning", "midday", "check", "evening"],
   moderate: ["morning", "midday", "evening"],
   light: ["morning", "evening"],
@@ -25,6 +25,52 @@ describe("PRESET_SLOTS", () => {
 
   it("light keeps only morning and evening", () => {
     expect(PRESET_SLOTS.light).toEqual(["morning", "evening"]);
+  });
+
+  it("off has no slots", () => {
+    expect(PRESET_SLOTS.off).toEqual([]);
+  });
+});
+
+describe("planPing — off preset silences everything", () => {
+  for (const slot of ALL_SLOTS) {
+    it(`off preset, ${slot} slot → send=false with reason "pings are off"`, () => {
+      const result = planPing({ slot, nagFrequency: "off" });
+      expect(result.send).toBe(false);
+      expect(result.reason).toBe("pings are off");
+    });
+  }
+
+  it("off suppresses every slot regardless of dayQuality 'good'", () => {
+    for (const slot of ALL_SLOTS) {
+      const result = planPing({ slot, nagFrequency: "off", dayQuality: "good" });
+      expect(result.send, `off/${slot} with good day`).toBe(false);
+      expect(result.reason, `off/${slot} with good day`).toBe("pings are off");
+    }
+  });
+
+  it("off suppresses every slot regardless of dayQuality 'bad'", () => {
+    for (const slot of ALL_SLOTS) {
+      const result = planPing({ slot, nagFrequency: "off", dayQuality: "bad" });
+      expect(result.send, `off/${slot} with bad day`).toBe(false);
+      expect(result.reason, `off/${slot} with bad day`).toBe("pings are off");
+    }
+  });
+
+  it("off suppresses every slot regardless of dayQuality null", () => {
+    for (const slot of ALL_SLOTS) {
+      const result = planPing({ slot, nagFrequency: "off", dayQuality: null });
+      expect(result.send, `off/${slot} with null day`).toBe(false);
+      expect(result.reason, `off/${slot} with null day`).toBe("pings are off");
+    }
+  });
+
+  it("off suppresses every slot when dayQuality is omitted", () => {
+    for (const slot of ALL_SLOTS) {
+      const result = planPing({ slot, nagFrequency: "off" });
+      expect(result.send, `off/${slot} with undefined day`).toBe(false);
+      expect(result.reason, `off/${slot} with undefined day`).toBe("pings are off");
+    }
   });
 });
 

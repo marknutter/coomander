@@ -53,7 +53,7 @@ export async function PATCH(request: Request) {
 
     if (body.nagFrequency !== undefined) {
       if (!isValidNagFrequency(body.nagFrequency)) {
-        throw new BadRequestError("nagFrequency must be one of: tight, moderate, light");
+        throw new BadRequestError("nagFrequency must be one of: off, light, moderate, tight");
       }
       patch.nagFrequency = body.nagFrequency;
     }
