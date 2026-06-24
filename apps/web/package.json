@@ -25,6 +25,8 @@
     "db:generate": "drizzle-kit generate",
     "db:studio": "drizzle-kit studio",
     "docker:dev": "DOCKER_BUILDKIT=0 docker compose -f ../../docker-compose.yml --profile dev up --build",
+    "docker:dev:telegram": "DOCKER_BUILDKIT=0 docker compose -f ../../docker-compose.yml --profile dev --profile telegram up --build",
+    "telegram:webhook": "npx tsx scripts/telegram-webhook.ts",
     "email:dev": "email dev --dir emails"
   },
   "dependencies": {

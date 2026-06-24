@@ -88,6 +88,51 @@ OAuth providers (Google, GitHub, Microsoft) need both URLs allow-listed:
 
 Set up via `/configure-sso` — it knows about both.
 
+## Local Telegram dev (per-developer bot + Cloudflare Tunnel)
+
+Coomander's Telegram inbound is **webhook-based** (`POST /api/coomander/webhook`), and **Telegram allows exactly one webhook URL per bot.** Production's `@coomander_bot` already owns it (→ `https://coomander.com/api/coomander/webhook`). So to use Telegram against *your* local dev server — the bot replying, and the **Connect Telegram** link flow — you run **your own dev bot** plus a **persistent Cloudflare Tunnel** to your machine.
+
+> Optional. Skip this entirely for normal dev — `docker compose up` works without it; only outbound features that *send* Telegram need a token, and inbound needs this tunnel.
+
+### One-time setup
+
+1. **Create a dev bot.** In Telegram, message [@BotFather](https://t.me/BotFather) → `/newbot` → name it (e.g. `Coomander Dev (you)`), username e.g. `coomander_dev_you_bot`. Save the **bot token** and the **@username**.
+
+2. **Create a Cloudflare named tunnel** (free; uses the existing `coomander.com` zone). In the [Zero Trust dashboard](https://one.dash.cloudflare.com) → **Networks → Tunnels → Create a tunnel** → *Cloudflared*:
+   - Name it `coomander-dev-<you>`; copy the **tunnel token**.
+   - Add a **Public Hostname**: subdomain `dev-<you>`, domain `coomander.com`, **Path** `api/coomander/webhook`, Service `HTTP` → `localhost:3000`. (Path-scoping keeps the rest of your dev server private; the catch-all stays a 404.)
+
+3. **Set env vars.**
+   - Repo-root `.env` (compose interpolation): `CLOUDFLARE_TUNNEL_TOKEN=<tunnel token>`
+   - `apps/web/.env.local`:
+     ```bash
+     MADDIE_TELEGRAM_BOT_TOKEN=<your dev bot token>
+     MADDIE_TELEGRAM_WEBHOOK_SECRET=$(openssl rand -hex 24)
+     COOMANDER_BOT_USERNAME=coomander_dev_you_bot         # so the Connect link points at YOUR dev bot
+     TELEGRAM_WEBHOOK_URL=https://dev-you.coomander.com/api/coomander/webhook
+     ```
+
+### Each session
+
+```bash
+# from apps/web — starts the normal stack PLUS the cloudflared sidecar
+npm run docker:dev:telegram          # = docker compose --profile dev --profile telegram up --build
+
+# register your dev bot's webhook at your tunnel (one-time per bot, or after changing the URL)
+npm run telegram:webhook -- set --yes
+npm run telegram:webhook -- info     # verify: url + 0 pending + no last_error
+```
+
+The `set` command prints the resolved bot `@username` first and **requires `--yes`** — a guard so you can't accidentally repoint prod's `@coomander_bot` (verify the username is your dev bot before confirming).
+
+Then open the app (localhost:3005 or the tailnet URL), go to the home/onboarding **Connect Telegram** card → tap the deep link (or send the code) to **your dev bot** → it links your local user. Now pings and replies flow through your machine.
+
+### Notes
+
+- **One webhook per bot** is why each developer needs their own bot — two people can't point the same bot at two tunnels.
+- `npm run telegram:webhook -- delete` clears your dev bot's webhook (e.g. before stepping away).
+- Never put `COOMANDER_TELEGRAM_DISABLED` in `.env.local` — it bakes into the prod bundle.
+
 ## Environment variables
 
 | Variable | Required | Description |
@@ -105,6 +150,11 @@ Set up via `/configure-sso` — it knows about both.
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | If using GitHub SSO | OAuth credentials. |
 | `ANTHROPIC_API_KEY` | If using AI chat | Claude API for the chat surface. |
 | `ELEVENLABS_API_KEY` | If using voice | ElevenLabs TTS (optional — chat falls back to text). |
+| `MADDIE_TELEGRAM_BOT_TOKEN` | If using Telegram | Bot token from @BotFather. Prod = `@coomander_bot`; local dev = your own dev bot (see "Local Telegram dev"). |
+| `MADDIE_TELEGRAM_WEBHOOK_SECRET` | If using Telegram inbound | Secret echoed on the inbound webhook; `openssl rand -hex 24`. |
+| `COOMANDER_BOT_USERNAME` | No | @username (no @) for the Connect-Telegram deep link; defaults to `coomander_bot`. Set to your dev bot's username in local dev. |
+| `TELEGRAM_WEBHOOK_URL` | Local Telegram dev | Public webhook URL used by `npm run telegram:webhook -- set` (your Cloudflare Tunnel host + `/api/coomander/webhook`). |
+| `CLOUDFLARE_TUNNEL_TOKEN` | Local Telegram dev | Token for the `cloudflared` sidecar; goes in the repo-root `.env`. See "Local Telegram dev". |
 
 Local: put these in `node/.env.local` (gitignored). Production: `npx wrangler secret put VAR_NAME`.
 
