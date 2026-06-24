@@ -30,8 +30,11 @@
     "email:dev": "email dev --dir emails"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "3.0.84",
     "@anthropic-ai/sdk": "^0.80.0",
     "@coomander/core": "*",
+    "ai": "6.0.206",
+    "workers-ai-provider": "3.2.0",
     "agents": "0.14.5",
     "@radix-ui/react-alert-dialog": "1.1.15",
     "@radix-ui/react-dialog": "1.1.15",

@@ -67,11 +67,16 @@ FLAG_COOMANDER_AGENTS_CHAT = "true"
 # (also needs the CF_ANALYTICS_API_TOKEN secret + the CLOUDFLARE_ACCOUNT_ID
 # above, with the "Account Analytics: Read" grant).
 AI_GATEWAY_ID = "coomander-gateway"
-#
-# NOTE: the web worker intentionally has NO [ai] binding. Workers AI (if added
-# later) runs on the AGENTS worker (apps/agents), which would declare its own
-# [ai] binding there. Don't re-add one here unless web code actually calls
-# Workers AI directly.
+
+# ── Workers AI binding (#218) ──────────────────────────────────────────
+# The web worker NOW calls Workers AI directly: the Telegram inbound classifier
+# (lib/coomander/inbound.ts → inbound-model.ts) dispatches the admin/user-chosen
+# model through the multi-provider engine, running open `@cf/...` models via
+# createWorkersAI({ binding: env.AI }). Named envs don't inherit bindings, so
+# this is redeclared under [env.production.ai] below. In `next dev` there is no
+# binding, so Workers-AI choices fall back to Anthropic (handled in inbound-model).
+[ai]
+binding = "AI"
 
 
 # ── D1 (Cloudflare's serverless SQLite) ────────────────────────────────
@@ -135,3 +140,8 @@ deleted_classes = ["AppAgent"]
 # created.
 [env.production]
 name = "coomander"
+
+# Workers AI binding (#218) — NOT inherited from the top-level env, so redeclare
+# it for production. Powers the Telegram inbound classifier's Workers-AI path.
+[env.production.ai]
+binding = "AI"

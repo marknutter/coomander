@@ -13,7 +13,9 @@
  * validated match; anything ambiguous becomes need_clarification.
  */
 
-import Anthropic from "@anthropic-ai/sdk";
+import { generateText, tool, type ModelMessage } from "ai";
+import { z } from "zod";
+import { resolveInboundModel } from "./inbound-model";
 import { logCoomanderUsage } from "./usage";
 import { listMessages } from "./coomanderMessages";
 import { listBeats } from "./beats";
@@ -28,8 +30,6 @@ import { getTodayModel, type TodayModel } from "./todayModel";
 import { daysSinceStart } from "./agent";
 import { expectedToday } from "./ramp";
 import type { ContentStateValue, CadenceBeat, ContentState, ProcurementItem } from "@/lib/schema";
-
-const MODEL = process.env.COOMANDER_AGENT_MODEL || process.env.CHAT_MODEL || "claude-sonnet-4-6";
 
 export const TOOLS = {
   LOG_DROP: "log_drop",
@@ -106,101 +106,73 @@ export interface InboundContext {
   procurement: ProcurementItem[];
 }
 
-// ── Anthropic tool definitions ────────────────────────────────────────────────
+// ── Tool definitions (Vercel AI SDK + zod) ─────────────────────────────────────
+// One tool per TOOLS.* name, keyed identically so resolveToolUse/executeAction
+// are untouched. No `execute` — the model's tool calls are returned for our own
+// validation (resolveToolUse) rather than auto-executed. Tool descriptions are
+// verbatim from the prior Anthropic schema; property hints preserved via
+// `.describe()`. Exported so a test can assert the tool shapes.
 
-export function tools(): Anthropic.Tool[] {
-  return [
-    {
-      name: TOOLS.LOG_DROP,
+export function inboundTools() {
+  return {
+    [TOOLS.LOG_DROP]: tool({
       description:
         "Record an act of execution against one of the creator's beats: a reel shipped, a live stream done, wall content captured. 'kind' is 'shipped' for a posted/published piece, 'captured' for wall content shot but not yet posted, 'completed' for a non-content task, 'purchased' is not used here (use log_purchase). Set platform when known.",
-      input_schema: {
-        type: "object",
-        properties: {
-          beat_id: { type: "string", description: "id of the matched beat (from the list provided)." },
-          kind: { type: "string", enum: ["shipped", "captured", "completed"], description: "shipped=posted; captured=shot for the wall buffer; completed=other task." },
-          count: { type: "integer", minimum: 1, description: "How many of THIS beat were shipped/captured in this message (e.g. 'posted 2 reels' -> 2). Defaults to 1. Use one log_drop with count=N for N of the same beat; use separate log_drop calls for different beats." },
-          platform: { type: "string", enum: ["ig", "tiktok", "fb", "snap", "of"], description: "Platform, if stated or obvious." },
-          notes: { type: "string", description: "Optional free text." },
-        },
-        required: ["beat_id", "kind"],
-      },
-    },
-    {
-      name: TOOLS.ADVANCE,
+      inputSchema: z.object({
+        beat_id: z.string().describe("id of the matched beat (from the list provided)."),
+        kind: z.enum(["shipped", "captured", "completed"]).describe("shipped=posted; captured=shot for the wall buffer; completed=other task."),
+        count: z.number().int().min(1).optional().describe("How many of THIS beat were shipped/captured in this message (e.g. 'posted 2 reels' -> 2). Defaults to 1. Use one log_drop with count=N for N of the same beat; use separate log_drop calls for different beats."),
+        platform: z.enum(["ig", "tiktok", "fb", "snap", "of"]).optional().describe("Platform, if stated or obvious."),
+        notes: z.string().optional().describe("Optional free text."),
+      }),
+    }),
+    [TOOLS.ADVANCE]: tool({
       description:
         "Move a content item to a new lifecycle state (e.g. 'the editor finished the gym reel' -> edited). You may advance one step forward or move backward with a reason. States: drafted, shot, approved, uploaded_to_edit, edited, scheduled, shipped.",
-      input_schema: {
-        type: "object",
-        properties: {
-          content_id: { type: "string", description: "id of the content item (from the list provided)." },
-          new_state: { type: "string", enum: CONTENT_STATES as unknown as string[], description: "The target state." },
-          notes: { type: "string", description: "Reason (required when moving backward)." },
-        },
-        required: ["content_id", "new_state"],
-      },
-    },
-    {
-      name: TOOLS.LOG_PURCHASE,
+      inputSchema: z.object({
+        content_id: z.string().describe("id of the content item (from the list provided)."),
+        new_state: z.enum(CONTENT_STATES as unknown as [string, ...string[]]).describe("The target state."),
+        notes: z.string().optional().describe("Reason (required when moving backward)."),
+      }),
+    }),
+    [TOOLS.LOG_PURCHASE]: tool({
       description: "Mark a procurement item as received/purchased (e.g. 'the Halloween costume arrived').",
-      input_schema: {
-        type: "object",
-        properties: {
-          procurement_item_id: { type: "string", description: "id of the procurement item (from the list provided)." },
-          actual_cost: { type: "number", description: "Optional actual cost in dollars." },
-          notes: { type: "string" },
-        },
-        required: ["procurement_item_id"],
-      },
-    },
-    {
-      name: TOOLS.ADD_PROCUREMENT,
+      inputSchema: z.object({
+        procurement_item_id: z.string().describe("id of the procurement item (from the list provided)."),
+        actual_cost: z.number().optional().describe("Optional actual cost in dollars."),
+        notes: z.string().optional(),
+      }),
+    }),
+    [TOOLS.ADD_PROCUREMENT]: tool({
       description: "Add a new thing to acquire (e.g. 'I need new ring lights by next Friday'). category: shoot_prep (costumes, props, lights, locations) or business_admin (invoices, gear, tax).",
-      input_schema: {
-        type: "object",
-        properties: {
-          category: { type: "string", enum: ["shoot_prep", "business_admin"] },
-          label: { type: "string", description: "Short label for the item." },
-          needed_by: { type: "string", description: "Optional deadline as YYYY-MM-DD (resolve relative dates against today)." },
-          notes: { type: "string" },
-        },
-        required: ["category", "label"],
-      },
-    },
-    {
-      name: TOOLS.MARK_BLOCKER,
+      inputSchema: z.object({
+        category: z.enum(["shoot_prep", "business_admin"]),
+        label: z.string().describe("Short label for the item."),
+        needed_by: z.string().optional().describe("Optional deadline as YYYY-MM-DD (resolve relative dates against today)."),
+        notes: z.string().optional(),
+      }),
+    }),
+    [TOOLS.MARK_BLOCKER]: tool({
       description: "The creator can't execute today (e.g. 'can't shoot today, sick'). Sets the day to a bad day so Coomander softens and suppresses midday nags.",
-      input_schema: {
-        type: "object",
-        properties: {
-          beat_id: { type: "string", description: "Optional beat this blocks." },
-          reason: { type: "string", description: "Short reason." },
-        },
-        required: ["reason"],
-      },
-    },
-    {
-      name: TOOLS.ADJUST_BEAT,
+      inputSchema: z.object({
+        beat_id: z.string().optional().describe("Optional beat this blocks."),
+        reason: z.string().describe("Short reason."),
+      }),
+    }),
+    [TOOLS.ADJUST_BEAT]: tool({
       description: "Change a beat's target (e.g. 'cut me down to 3 reels a week this month').",
-      input_schema: {
-        type: "object",
-        properties: {
-          beat_id: { type: "string", description: "id of the beat to adjust." },
-          target_count: { type: "number", description: "New target count." },
-        },
-        required: ["beat_id"],
-      },
-    },
-    {
-      name: TOOLS.CLARIFY,
+      inputSchema: z.object({
+        beat_id: z.string().describe("id of the beat to adjust."),
+        target_count: z.number().optional().describe("New target count."),
+      }),
+    }),
+    [TOOLS.CLARIFY]: tool({
       description: "Ask a short clarifying question. Use when the message does not clearly match one beat/content/procurement item, or is not about logging at all. Never guess.",
-      input_schema: {
-        type: "object",
-        properties: { reply: { type: "string", description: "A short friendly question. No em-dashes." } },
-        required: ["reply"],
-      },
-    },
-  ];
+      inputSchema: z.object({
+        reply: z.string().describe("A short friendly question. No em-dashes."),
+      }),
+    }),
+  };
 }
 
 function contextString(ctx: InboundContext): string {
@@ -355,10 +327,9 @@ export async function executeAction(userId: string, action: ResolvedAction, ctx:
   }
 }
 
-// ── Anthropic classification ───────────────────────────────────────────────────
+// ── Multi-provider classification (#218) ────────────────────────────────────────
 
 async function classifyMessage(userId: string, text: string, ctx: InboundContext, personaMode: PersonaMode): Promise<ClassifiedTool[]> {
-  const client = new Anthropic();
   // Inject the recent thread (oldest-first) so a clarification answer resolves
   // against the message that prompted it — e.g. "normal reels" right after
   // "posted 2 gym reels" must log a drop, not ask again. The current inbound
@@ -371,18 +342,20 @@ async function classifyMessage(userId: string, text: string, ctx: InboundContext
         .map((m) => `${m.direction === "inbound" ? "creator" : "coomander"}: ${m.text}`)
         .join("\n")}\n\nIf the newest message answers a clarification you just asked, combine it with that earlier context and take the action — do not ask the same question again.`
     : "";
-  const msg = await client.messages.create({
-    model: MODEL,
-    max_tokens: 300,
-    system: [{ type: "text", text: systemPrompt(ctx, personaMode, today) + history, cache_control: { type: "ephemeral" } }],
-    tool_choice: { type: "any" },
-    tools: tools(),
-    messages: [{ role: "user", content: text }],
+  // Resolve the admin/per-user-chosen model (Anthropic or Workers AI) via the
+  // multi-provider engine; falls back to the Anthropic default when the chosen
+  // model lacks tool support or its binding is unavailable (see inbound-model).
+  const { model, resolvedId } = await resolveInboundModel(userId);
+  const result = await generateText({
+    model,
+    maxOutputTokens: 300,
+    system: systemPrompt(ctx, personaMode, today) + history,
+    tools: inboundTools(),
+    toolChoice: "required",
+    messages: [{ role: "user", content: text }] as ModelMessage[],
   });
-  await logCoomanderUsage(userId, "inbound", MODEL, msg.usage?.input_tokens, msg.usage?.output_tokens);
-  return msg.content
-    .filter((b): b is Anthropic.ToolUseBlock => b.type === "tool_use")
-    .map((b) => ({ toolName: b.name, input: (b.input ?? {}) as Record<string, unknown> }));
+  await logCoomanderUsage(userId, "inbound", resolvedId, result.usage?.inputTokens, result.usage?.outputTokens).catch(() => {});
+  return result.toolCalls.map((tc) => ({ toolName: tc.toolName, input: (tc.input ?? {}) as Record<string, unknown> }));
 }
 
 /** Load the classifier context (active beats, unshipped content, open procurement). */
