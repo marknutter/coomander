@@ -140,14 +140,19 @@ function CoomanderChat() {
         wsResolveRef.current = null;
       },
       onError: (message) => {
+        const turnWasActive = wsTurnRef.current || sendingRef.current;
         wsTurnRef.current = false;
         setStreamText(null);
         setSending(false);
         sendingRef.current = false;
-        setMessages((m) => [
-          ...m,
-          { id: `err-${Date.now()}`, role: "assistant", content: message },
-        ]);
+        // Socket reconnects happen in the background. Only render an error as
+        // part of the conversation when a user turn was actually in flight.
+        if (turnWasActive) {
+          setMessages((m) => [
+            ...m,
+            { id: `err-${Date.now()}`, role: "assistant", content: message },
+          ]);
+        }
         wsResolveRef.current?.();
         wsResolveRef.current = null;
       },

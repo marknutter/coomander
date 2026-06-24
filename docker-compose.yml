@@ -109,6 +109,9 @@ services:
       - agents_local_node_modules:/app/apps/agents/node_modules
     environment:
       NODE_ENV: development
+      # Keep Docker chat available with only ANTHROPIC_API_KEY configured.
+      # Set false when intentionally testing the remote Workers AI binding.
+      COOMANDER_AGENTS_LOCAL_ONLY: ${COOMANDER_AGENTS_LOCAL_ONLY:-true}
     restart: unless-stopped
 
   # ── Cloudflare Tunnel (opt-in: Telegram webhook in dev, #215) ────────────

@@ -16,6 +16,11 @@ Workers AI models — run through one `streamText` path on the agents Worker.
 > (`apps/agents`) over a WebSocket. `GET /api/coomander/chat` only hydrates the
 > thread on mount/refresh; there is no `POST` send handler.
 
+Telegram inbound uses `lib/coomander/inbound.ts`. Execution statements are
+classified into domain tools. Common read-only planning questions such as
+"What do I need to get done today?" bypass the write-action classifier and
+render a deterministic, ramp-aware answer from `TodayModel`.
+
 ## The catalog (`@coomander/core`)
 
 The single source of truth for which models exist lives in
@@ -125,7 +130,11 @@ the top-level and `[env.production]` wrangler envs — the top-level is what
 
 - **On Cloudflare Workers (prod)** — the binding works directly. No key; billed
   via the CF account.
-- **Local / Docker dev** — Workers AI inference can't run in local miniflare, so
+- **Local / Docker dev** — Docker defaults to explicit Wrangler `--local` mode,
+  which keeps Claude chat available with only `ANTHROPIC_API_KEY`; the Workers
+  AI binding is unavailable and selected open models fall back to Claude. Set
+  `COOMANDER_AGENTS_LOCAL_ONLY=false` when intentionally testing Workers AI.
+  Workers AI inference can't run in local miniflare, so
   `wrangler dev` proxies the `AI` binding to **remote** Cloudflare. It does this by
   deploying a temporary **preview Worker**, so the credential needs **Workers
   Scripts** access — **not just Workers AI**. A Workers-AI-only token can run AI
