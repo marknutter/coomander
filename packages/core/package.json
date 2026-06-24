@@ -1,6 +1,6 @@
 {
   "name": "@coomander/core",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "description": "Platform-agnostic core: Zod schemas, shared types, and a typed API client. No next/*, drizzle, better-sqlite3, react-dom, Node built-ins, or DOM globals (must run in React Native).",
