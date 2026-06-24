@@ -10,6 +10,9 @@
 set -e
 
 ARGS="--persist-to .wrangler/state"
+if [ "${COOMANDER_AGENTS_LOCAL_ONLY:-}" = "true" ]; then
+  ARGS="--local $ARGS"
+fi
 # Default port 8788 (what Caddy's /agents/* route targets) unless the caller
 # passes their own --port.
 case " $* " in

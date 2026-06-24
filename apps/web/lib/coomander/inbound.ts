@@ -24,6 +24,9 @@ import { listProcurement, createProcurement, updateProcurement, type Procurement
 import { setDayQuality } from "./scheduling";
 import { checkWallProhibitions } from "./wallProhibitions";
 import { userToday, type PersonaMode } from "./settings";
+import { getTodayModel, type TodayModel } from "./todayModel";
+import { daysSinceStart } from "./agent";
+import { expectedToday } from "./ramp";
 import type { ContentStateValue, CadenceBeat, ContentState, ProcurementItem } from "@/lib/schema";
 
 const MODEL = process.env.COOMANDER_AGENT_MODEL || process.env.CHAT_MODEL || "claude-sonnet-4-6";
@@ -40,6 +43,49 @@ export const TOOLS = {
 
 const FALLBACK_REPLY =
   "I could not tell exactly what to log there. Try naming the beat or content, like \"posted the gym reel\" or \"halloween costume arrived\".";
+
+export function isTodayPlanQuestion(text: string): boolean {
+  const normalized = text.trim().toLowerCase().replace(/[?!.,]+$/g, "");
+  return [
+    /\bwhat (?:do|should) i (?:need to )?(?:do|get done|work on|focus on)(?: today)?\b/,
+    /\bwhat(?:'s| is) (?:on )?(?:my|the) (?:plan|plate|table|list)(?: today)?\b/,
+    /\bwhat(?:'s| is) (?:the )?plan for today\b/,
+  ].some((pattern) => pattern.test(normalized));
+}
+
+export function todayPlanReply(model: TodayModel, daysIn: number): string {
+  const tasks: string[] = [];
+  const cushionUnit = model.content_cushion_days === 1 ? "day" : "days";
+
+  for (const pillar of model.pillars) {
+    for (const item of pillar.beats) {
+      const expected = expectedToday(item.beat, daysIn);
+      const remaining = Math.max(0, expected - item.actual_today);
+      if (remaining > 0) {
+        tasks.push(`${item.beat.name}: ${remaining} remaining`);
+      }
+
+      const buffer = item.buffer_status;
+      if (buffer && buffer.current_days < buffer.goal_days) {
+        tasks.push(`${item.beat.name}: build the buffer (${buffer.current_days}/${buffer.goal_days} days)`);
+      }
+    }
+  }
+
+  const urgent = [
+    ...model.procurement_urgent.shoot_prep,
+    ...model.procurement_urgent.business_admin,
+  ];
+  for (const item of urgent) {
+    tasks.push(`Get ${item.label}${item.needed_by ? ` by ${item.needed_by}` : ""}`);
+  }
+
+  if (!tasks.length) {
+    return `You're clear on today's tracked cadence. Your content cushion is ${model.content_cushion_days} ${cushionUnit}.`;
+  }
+
+  return `Today: ${tasks.join("; ")}. Content cushion: ${model.content_cushion_days} ${cushionUnit}.`;
+}
 
 export interface ClassifiedTool {
   toolName: string;
@@ -358,6 +404,16 @@ export async function loadContext(userId: string): Promise<InboundContext> {
  * tool call (for persistence), and whether a row was written.
  */
 export async function handleInbound(userId: string, text: string, personaMode: PersonaMode = "light_companion"): Promise<InboundResult> {
+  if (isTodayPlanQuestion(text)) {
+    const date = await userToday(userId);
+    const model = await getTodayModel(userId, date);
+    return {
+      reply: todayPlanReply(model, await daysSinceStart(userId, date)),
+      toolCall: [{ toolName: "answer_today", input: {} }],
+      acted: false,
+    };
+  }
+
   const ctx = await loadContext(userId);
   const classified = await classifyMessage(userId, text, ctx, personaMode);
   if (!classified.length) return { reply: FALLBACK_REPLY, toolCall: null, acted: false };
