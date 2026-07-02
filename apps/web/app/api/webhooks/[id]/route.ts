@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { UnauthorizedError, NotFoundError, BadRequestError, errorResponse } from "@/lib/errors";
 import { getWebhook, updateWebhook, deleteWebhook } from "@/lib/webhooks";
+import { assertSafeWebhookUrl } from "@/lib/ssrf";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -36,26 +37,17 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     const body = await request.json();
 
     if (body.url) {
-      try {
-        new URL(body.url);
-      } catch {
-        throw new BadRequestError("Invalid URL");
-      }
-
       if (!body.url.startsWith("https://") && !(process.env.NODE_ENV !== "production" && body.url.startsWith("http://localhost"))) {
         throw new BadRequestError("Webhook URL must use HTTPS");
       }
 
-      // Block internal/private IP ranges (SSRF protection)
-      const parsed = new URL(body.url);
-      const hostname = parsed.hostname;
-      const blockedPatterns = [
-        /^127\./, /^10\./, /^172\.(1[6-9]|2\d|3[01])\./, /^192\.168\./,
-        /^169\.254\./, /^0\./, /^::1$/, /^localhost$/i,
-        /^metadata\.google\.internal$/i, /^metadata\.internal$/i,
-      ];
-      if (process.env.NODE_ENV === "production" && blockedPatterns.some((p) => p.test(hostname))) {
-        throw new BadRequestError("Webhook URL cannot target internal addresses");
+      // SSRF protection: single source of truth (lib/ssrf.ts). Rejects
+      // non-http(s) schemes, IP literals in private/loopback/link-local/CGNAT
+      // ranges, and DNS names that resolve to such addresses. Throws → 400.
+      try {
+        await assertSafeWebhookUrl(body.url);
+      } catch (err) {
+        throw new BadRequestError(err instanceof Error ? err.message : "Invalid URL");
       }
     }
 
