@@ -19,10 +19,11 @@ requires_env_vars: [WEBHOOK_ALLOW_PRIVATE_TARGETS, CAMPAIGN_BATCH_SIZE, STUCK_CA
 breaking: false
 ---
 
-## AppSeed sync 2026-07-02 — realtime backbone, prod D1 fixes, admin/security hardening, email marketing
+## AppSeed sync 2026-07-02 — realtime, prod D1 fixes, admin/security, email marketing, chat charts/image-gen, Postgres
 
-Large sync from the AppSeed template (issue #222, PR #223). Substantial portion complete; a
-follow-up tracks the remainder (Postgres deploy-target fix, chat UI features, mobile).
+Large sync from the AppSeed template (issue #222, PR #223). **All 27 checklist items ported**
+(minus the 3 irrelevant). 850 tests green; typecheck clean across web/agents/core; Postgres
+live-verified on 16.
 
 **Realtime backbone** — replaced the in-process SSE pub/sub (broken across Worker isolates under
 OpenNext) with a `RealtimeChannel` Durable Object in `apps/agents`, DO-backed `publish()` via a
@@ -46,5 +47,18 @@ OAuth removed. Voice headers fixed (`microphone=(self)` + CSP `media-src`).
 reconciler. Send route reverts to `failed` on enqueue error; batch progress is idempotent per
 `(campaignId, batchIndex)` against Cloudflare Queues at-least-once redelivery.
 
-Migrations: SQLite 023–027, PG 006–010 (025/008 intentionally unused). New Cloudflare Queue must
-be created before prod deploy (`wrangler queues create coomander-campaign-send`).
+**Chat** — connecting/reconnecting indicator + send-gating; safeSend guard + stream abort +
+inactivity watchdog; worker-side error surfacing; rich-block pipeline in `@coomander/core`
+(consolidated 4 stripTags impls); `[CHART:]` charts (Recharts); shadcn chat components
+(MessageScroller); `[IMAGE:]` AI image generation (flux via Workers AI + R2 serving, auth-scoped
+keys + per-user/day quota); dev/prod AI-gateway split docs.
+
+**Mobile** — Expo `useRealtime` + proactive delivery; Android edge-to-edge keyboard fix.
+**Live campaign progress** — admin campaign page subscribes to the `campaign:{id}` realtime channel.
+**PostgreSQL target fixed** — dialect-aware `scripts/migrate.ts`, `getEffectivePlan` PG branch,
+authored PG migrations for all 43 `schema.pg.ts` tables, schema↔migration drift-guard test.
+
+New deps: `recharts@3.9.0`, `@shadcn/react@0.1.0` (run `npm install`). Migrations: SQLite 023–027,
+PG 001/006–011 (025/008 intentionally unused). New Cloudflare Queue must be created before prod
+deploy (`wrangler queues create coomander-campaign-send`); image-gen needs `CLOUDFLARE_ACCOUNT_ID`
++ a Workers-AI-scoped `CLOUDFLARE_API_TOKEN` on the agents worker.
