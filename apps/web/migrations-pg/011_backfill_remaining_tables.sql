@@ -10,6 +10,14 @@
 -- user_roles; webhooks before webhook_deliveries; cadence_pillars before
 -- cadence_beats before content_states before drops/procurement_items).
 
+-- ─── user-table extensions (PG twin of migrations/016_coomander_infra.sql's
+-- "User-table extensions" block — never ported). Needed for the
+-- coomander_link_codes flow (which sets user.telegramChatId) to work at all
+-- on PG, same class of bug as the missing isAdmin/disabled columns fixed in
+-- 001_add_admin.sql. ────────────────────────────────────────────────────────
+ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "telegramChatId" TEXT;
+ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "coomanderEnabled" INTEGER NOT NULL DEFAULT 0;
+
 -- ─── jobs ──────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS jobs (
   id TEXT PRIMARY KEY,
