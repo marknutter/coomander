@@ -17,6 +17,7 @@ import * as Speech from "expo-speech";
 import { useRouter } from "expo-router";
 
 import { getThread, type CoomanderMessage } from "@/lib/api";
+import { authClient } from "@/lib/auth-client";
 import { useTheme } from "@/lib/theme";
 import { Screen } from "@/components/screen";
 import { ApiError } from "@coomander/core";
@@ -32,6 +33,7 @@ import {
   type ServerFrame,
   type StreamState,
 } from "@/lib/agent-socket-protocol";
+import { useRealtime, type RealtimeEvent } from "@/lib/use-realtime";
 
 // How long to wait for the WebSocket to open before surfacing an error to the
 // user (the socket auto-connects on mount and reconnects with backoff; this just
@@ -193,10 +195,15 @@ export default function CoomanderChatScreen() {
   const [stream, setStream] = useState<StreamState>(initialStreamState);
   const wsTurnRef = useRef<{ userMsgId: string; text: string } | null>(null);
   const wsResolveRef = useRef<(() => void) | null>(null);
-  const proactiveProcessedRef = useRef(0);
+
+  // Session user id — used only to subscribe to this user's realtime channel
+  // below (agent-initiated proactive/scheduled messages, #222).
+  const { data: session } = authClient.useSession();
+  const userId = session?.user?.id ?? null;
 
   // Reload the canonical unified thread (real ids, ordering, tool side effects).
-  // Used on mount and after a WS turn finishes / a persisted proactive arrives.
+  // Used on mount, after a WS turn finishes, and after a persisted agent-message
+  // arrives over the realtime channel.
   const loadThread = useCallback(async () => {
     const thread = await getThread();
     setEnabled(thread.enabled);
@@ -228,7 +235,7 @@ export default function CoomanderChatScreen() {
   }, [loadThread]);
 
   // Fold every server frame into the pure stream state. The effects below react
-  // to the resulting `done` / `error` / `proactive` transitions.
+  // to the resulting `done` / `error` transitions.
   const onFrame = useCallback((frame: ServerFrame) => {
     setStream((s) => reduce(s, frame));
   }, []);
@@ -291,29 +298,42 @@ export default function CoomanderChatScreen() {
     wsResolveRef.current = null;
   }, [stream.error]);
 
-  // Proactive (agent-initiated) messages. Persisted ones (carry a
-  // conversationId) are already in the thread server-side → reload to render in
-  // place; standalone ones are appended directly. A processed-index ref drains
-  // the append-only queue exactly once.
-  useEffect(() => {
-    if (stream.proactive.length <= proactiveProcessedRef.current) return;
-    const fresh = stream.proactive.slice(proactiveProcessedRef.current);
-    proactiveProcessedRef.current = stream.proactive.length;
-    if (fresh.some((p) => p.conversationId)) {
-      loadThread().catch(() => {});
-    }
-    const standalone = fresh.filter((p) => !p.conversationId);
-    if (standalone.length > 0) {
-      setMessages((prev) => [
-        ...prev,
-        ...standalone.map((p) => ({
-          id: tmpId("proactive"),
-          role: "assistant" as const,
-          content: p.message,
-        })),
-      ]);
-    }
-  }, [stream.proactive, loadThread]);
+  /**
+   * Handle an agent-initiated message pushed OUTSIDE any user turn — e.g. a
+   * `schedule_followup` reminder fired by the AppAgent. AppAgent.deliverProactive
+   * (apps/agents/src/index.ts) publishes `{ type: "agent-message", message,
+   * conversationId }` to this user's `user:<id>` realtime channel (#222)
+   * instead of a `proactive` frame on the chat socket — see the useRealtime
+   * subscription below. When it carries the thread id, the message was already
+   * persisted server-side, so reload the canonical thread (real id, ordering,
+   * tool side effects) rather than client-appending it. With no conversationId,
+   * fall back to a transient bubble.
+   */
+  const handleAgentMessage = useCallback(
+    (message: string, conversationId?: string) => {
+      if (conversationId) {
+        loadThread().catch(() => {});
+      } else {
+        setMessages((prev) => [
+          ...prev,
+          { id: tmpId("proactive"), role: "assistant", content: message },
+        ]);
+      }
+    },
+    [loadThread],
+  );
+
+  // Subscribe to the user's realtime channel (`user:<id>`) and route
+  // agent-initiated messages to `handleAgentMessage`.
+  const onRealtimeEvent = useCallback(
+    (event: RealtimeEvent) => {
+      if (event.type === "agent-message") {
+        handleAgentMessage(event.message as string, event.conversationId as string | undefined);
+      }
+    },
+    [handleAgentMessage],
+  );
+  useRealtime(userId ? `user:${userId}` : null, onRealtimeEvent);
 
   // ── Auto-scroll to the bottom on new content ──────────────────────────
   useEffect(() => {
@@ -498,7 +518,7 @@ export default function CoomanderChatScreen() {
 
       <KeyboardAvoidingView
         style={styles.fill}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        behavior="padding"
         keyboardVerticalOffset={0}
       >
         {/* Messages / loading / empty */}
