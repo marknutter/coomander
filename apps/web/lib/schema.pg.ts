@@ -290,6 +290,8 @@ export const emailCampaigns = pgTable("email_campaigns", {
   audience_filter: text("audience_filter").default("{}"),
   recipient_count: integer("recipient_count").default(0),
   sent_count: integer("sent_count").default(0),
+  batches_total: integer("batches_total").default(0),
+  batches_done: integer("batches_done").default(0),
   scheduled_at: text("scheduled_at"),
   sent_at: text("sent_at"),
   resend_broadcast_id: text("resend_broadcast_id"),

@@ -100,6 +100,23 @@ migrations_dir = "migrations"
 binding = "STORAGE"
 bucket_name = "coomander-storage"
 
+# ── Campaign send queue (#454, epic #595, sync #222) ───────────────────
+# Batched email-campaign send engine (lib/campaign-send.ts). The producer
+# binding enqueues one message per recipient batch; the consumer (this same
+# Worker — see custom-worker.ts `queue()` → lib/queue-consumer.ts) drains them
+# with CF Queue's native retry/backoff, replaying each through
+# POST /api/internal/campaign-batch (authenticated with AGENTS_INTERNAL_SECRET,
+# NOT a CRON_SECRET). Create the queue before first deploy:
+#   wrangler queues create coomander-campaign-send
+[[queues.producers]]
+binding = "CAMPAIGN_QUEUE"
+queue = "coomander-campaign-send"
+
+[[queues.consumers]]
+queue = "coomander-campaign-send"
+max_batch_size = 10
+max_batch_timeout = 5
+
 # ── Video processor (Cloudflare Containers via separate Worker) ────────
 # Lives in node/workers/video-processor and owns the VideoProcessor
 # Container Class (ffmpeg + Whisper + Claude vision). Deployed
