@@ -20,6 +20,7 @@
 
 import { Component, type ReactNode } from "react";
 import type { RichSegment } from "@coomander/core";
+import { ChatChart } from "./chat-chart";
 
 type Block = Extract<RichSegment, { kind: "block" }>;
 
@@ -53,8 +54,11 @@ class BlockErrorBoundary extends Component<
 export function ChatBlock({ block }: { block: Block }) {
   let inner: ReactNode;
   switch (block.type) {
-    // Cases are added by the slice that ships each renderer (chart/image) —
-    // until then, any block type falls through to the raw-text default below.
+    case "chart":
+      inner = <ChatChart json={block.json} />;
+      break;
+    // Cases are added by the slice that ships each renderer — until then, any
+    // block type falls through to the raw-text default below.
     default:
       inner = <span className="whitespace-pre-wrap">{block.raw}</span>;
   }

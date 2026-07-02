@@ -1,17 +1,16 @@
 ---
-title: Rich Chat Blocks (foundation)
-description: The shared parser/stripper pipeline for inline non-markdown content (charts, images) in an assistant reply, and how the four chat surfaces consolidate on it.
+title: Rich Chat Blocks
+description: The shared parser/stripper pipeline for inline non-markdown content (charts, images) in an assistant reply, how it renders, and how the chat surfaces consolidate on it.
 ---
 
 # Rich Chat Blocks
 
-Coomander's chat pipeline has a **shared foundation** for rendering
-non-markdown content inline in an assistant reply — e.g. data **charts** or
-AI-generated **images** — even though no block renderer exists yet. The model
-would emit a JSON-carrying marker on its own; the app parses it out of the
-streamed text and (once a renderer ships) would render a React component in
-its place. This page documents the parsing/stripping foundation. Rendering
-charts/images inline is a separate, not-yet-implemented follow-on.
+Coomander's chat pipeline renders non-markdown content inline in an assistant
+reply — data **charts** and AI-generated **images** — via a shared
+parse/strip/render foundation. The model emits a JSON-carrying marker in its
+reply; `apps/web/components/chat-message.tsx` parses it out of the streamed
+text with `parseRichSegments` and dispatches it to a React component via
+`<ChatBlock>` (`apps/web/components/chat/chat-blocks.tsx`).
 
 ## The marker format
 
@@ -25,11 +24,9 @@ is a JSON **object** — and because a chart's `data` arrays contain `]`, a naiv
 `\[[A-Z_]+:[^\]]+\]` regex mis-terminates at the first inner `]`. Parsing uses a
 hand-written, brace-balanced, string-literal-aware scanner instead.
 
-**Today, nothing teaches the model this marker syntax** — `coomanderChat.ts`'s
-system prompt doesn't mention `[CHART:]`/`[IMAGE:]`, so in practice these
-markers never appear in a reply yet. The pipeline below exists so that when a
-future block-rendering surface is added, every consumer already handles
-markers correctly instead of mangling them.
+`coomanderChat.ts`'s system prompt (`chatSystemPrompt`, the single source of
+truth for the Coomander chat prompt) teaches the model this marker syntax via
+the `RICH_CONTENT` block — see [Charts](#charts) and [Images](#images) below.
 
 ## The shared pipeline (`@coomander/core/chat/rich-blocks`)
 
@@ -38,8 +35,8 @@ they can't drift:
 
 | Function | Used by | Behaviour |
 |---|---|---|
-| `parseRichSegments(text)` | any future block renderer | splits text into ordered `{kind:"text"}` / `{kind:"block", type, json}` segments |
-| `stripSystemTags(text)` | agents worker persist + `done` frame, web assistant display | strips `[PROFILE:]/[STEP_*:]` system tags but **keeps** block markers |
+| `parseRichSegments(text)` | `chat-message.tsx`'s assistant render path | splits text into ordered `{kind:"text"}` / `{kind:"block", type, json}` segments, each dispatched to `<ChatBlock>` |
+| `stripSystemTags(text)` | agents worker persist + `done` frame, web assistant display (pre-segment-split) | strips `[PROFILE:]/[STEP_*:]` system tags but **keeps** block markers |
 | `stripAllTags(text)` | user-message echo, **mobile**, **TTS** | strips everything (no block renderer there) |
 | `stripTrailingPartialMarker(text)` | web streaming | hides a still-streaming `[CHART:{"ty…` tail so it never flashes as raw text |
 
@@ -67,17 +64,59 @@ slightly different (and in one case, badly broken) regex:
   `stripAllTags`. Previously this only matched a literal `[TAG:\w+=\w+]`
   pattern and would not have stripped `[CHART:]`/`[IMAGE:]` markers at all.
 
-## Adding a block-rendering surface later
+## The dispatcher (`ChatBlock`)
 
-1. Add a `ChatBlock` dispatcher in `apps/web/components/` that consumes
-   `parseRichSegments()` output and renders each `{kind:"block"}` segment,
-   wrapped in an error boundary so a malformed payload degrades to a small
-   inline notice instead of crashing the message.
-2. Teach the model the marker syntax in `apps/web/lib/coomander/coomanderChat.ts`'s
-   system prompt (the single source of truth for the Coomander chat prompt —
-   NOT `apps/agents/src/chat-config.ts`, which only fetches the rendered
-   prompt per turn).
-3. If adding a new block type beyond `CHART`/`IMAGE`, extend
-   `BLOCK_MARKER_PREFIXES` + `PREFIX_TO_TYPE` in
-   `packages/core/src/chat/rich-blocks.ts` — the strip helpers automatically
-   pick up any prefix in that closed set.
+`apps/web/components/chat/chat-blocks.tsx` exports `ChatBlock`, which
+`chat-message.tsx` renders for every `{kind:"block"}` segment. It switches on
+`block.type` and renders the matching per-type component, wrapped in a
+`BlockErrorBoundary` — a malformed payload (failed `parseChartSpec`/schema
+validation, bad JSON, etc.) degrades to a small inline "couldn't render this
+content" notice instead of crashing the whole message. A block type with no
+renderer wired (or one this build doesn't recognize) falls back to its raw
+marker text rather than losing the content — see the `default` case.
+
+Per-type renderers live in their own files so slices stay disjoint: charts own
+`apps/web/components/chat/chat-chart.tsx`, images own
+`apps/web/components/chat/chat-image.tsx`; neither touches the dispatcher
+beyond adding its `case`.
+
+## Charts
+
+`[CHART:{…}]` renders a **recharts** chart (bar/line/pie/area) inline:
+
+```
+[CHART:{"type":"bar","title":"Reels this week","labels":["Mon","Tue","Wed"],"series":[{"name":"Shipped","data":[2,1,3]}]}]
+```
+
+- **Validation** (`packages/core/src/chat/chart-spec.ts`, exported from the
+  `@coomander/core` chat barrel): a Zod `chartSpecSchema`. `type` &isin;
+  `bar | line | pie | area`; `labels` are x-axis categories; every series'
+  `data` array must align 1:1 with `labels` (cross-field refinement); caps of
+  &le;12 series and &le;200 points/series bound abuse. `parseChartSpec(json)`
+  never throws — it returns `null` on any failure, and `ChatChart` turns that
+  into a thrown error so the `BlockErrorBoundary` shows its fallback.
+- **Rendering** (`apps/web/components/chat/chat-chart.tsx`): maps the spec into
+  recharts' row shape and renders via the shadcn `ui/chart.tsx` primitives
+  (`ChartContainer`/`ChartTooltip`/`ChartLegend`), which inject theme-aware
+  `--color-<key>` CSS vars per series so charts track light/dark automatically.
+  The first series uses the app's brand `--primary`; additional series cycle a
+  small fixed palette.
+- **New dependency:** `recharts@3.9.0` (pinned exact, React-19-ready).
+- The system prompt instructs the model to chart only real data it has (from
+  the conversation or the live ops state) and never fabricate numbers.
+
+## Images
+
+See the `generate_image` tool (`apps/agents/src/tools.ts`) and
+`apps/web/components/chat/chat-image.tsx` for AI-generated inline images via
+`[IMAGE:{"key":…,"alt":…}]` — R2-backed, auth-scoped storage keys, per-user/day
+quota enforced in `POST /api/images`.
+
+## Adding another block type
+
+If adding a new block type beyond `CHART`/`IMAGE`, extend
+`BLOCK_MARKER_PREFIXES` + `PREFIX_TO_TYPE` in
+`packages/core/src/chat/rich-blocks.ts` (the strip helpers automatically pick
+up any prefix in that closed set), add a `case` + renderer component in
+`chat-blocks.tsx`, and teach the marker syntax in `coomanderChat.ts`'s
+`RICH_CONTENT` prompt block.

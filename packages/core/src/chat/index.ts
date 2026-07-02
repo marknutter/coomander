@@ -32,6 +32,11 @@ export {
 } from "./rich-blocks";
 export type { RichSegment, BlockType } from "./rich-blocks";
 
+// Validated [CHART:{…}] payload shape — the single source of truth for what
+// counts as a valid chart, consumed by the web ChatChart renderer.
+export { chartSpecSchema, parseChartSpec } from "./chart-spec";
+export type { ChartSpec, ChartSeries } from "./chart-spec";
+
 // Capability-gated multimodal message building + context trimming.
 export {
   applyContextWindow,
