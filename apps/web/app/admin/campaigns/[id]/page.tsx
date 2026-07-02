@@ -6,6 +6,7 @@ import { Send, Eye, ArrowLeft, Mail, MousePointerClick, AlertTriangle } from "lu
 import { Button } from "@/components/ui";
 import { toast } from "@/lib/use-toast";
 import { cn } from "@/lib/cn";
+import { AudiencePicker, parseAudienceFilter, ALL_AUDIENCE, type AudienceFilter } from "@/components/admin/audience-picker";
 
 interface Campaign {
   id: string;
@@ -49,6 +50,12 @@ export default function CampaignDetailPage() {
   const [previewText, setPreviewText] = useState("");
   const [htmlContent, setHtmlContent] = useState("");
 
+  // Audience + recipient count (#596/#222)
+  const [audienceFilter, setAudienceFilter] = useState<AudienceFilter>(ALL_AUDIENCE);
+  const [recipientCount, setRecipientCount] = useState<number | null>(null);
+  const [recipientDescription, setRecipientDescription] = useState("");
+  const [countLoading, setCountLoading] = useState(false);
+
   const fetchCampaign = useCallback(async () => {
     try {
       const res = await fetch(`/api/admin/campaigns/${id}`);
@@ -60,12 +67,32 @@ export default function CampaignDetailPage() {
       setSubject(c.subject);
       setPreviewText(c.preview_text ?? "");
       setHtmlContent(c.html_content);
+      setAudienceFilter(parseAudienceFilter(c.audience_filter));
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to load campaign");
     } finally {
       setLoading(false);
     }
   }, [id]);
+
+  const fetchRecipientCount = useCallback(async (filter: AudienceFilter) => {
+    setCountLoading(true);
+    try {
+      const res = await fetch("/api/admin/campaigns/audience-count", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ audience_filter: filter }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Failed to resolve audience");
+      setRecipientCount(json.data.count);
+      setRecipientDescription(json.data.description);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to resolve audience");
+    } finally {
+      setCountLoading(false);
+    }
+  }, []);
 
   const fetchAnalytics = useCallback(async () => {
     try {
@@ -86,6 +113,16 @@ export default function CampaignDetailPage() {
       fetchAnalytics();
     }
   }, [campaign, fetchAnalytics]);
+
+  // Live recipient count — re-resolved whenever the audience filter changes
+  // (light debounce so rapid tag clicks don't fire a request per click).
+  useEffect(() => {
+    if (!campaign) return;
+    const t = setTimeout(() => {
+      fetchRecipientCount(audienceFilter);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [campaign, audienceFilter, fetchRecipientCount]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -108,6 +145,23 @@ export default function CampaignDetailPage() {
       toast.error(err instanceof Error ? err.message : "Save failed");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleAudienceChange = async (filter: AudienceFilter) => {
+    setAudienceFilter(filter);
+    if (!campaign || campaign.status !== "draft") return;
+    try {
+      const res = await fetch(`/api/admin/campaigns/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ audience_filter: JSON.stringify(filter) }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Failed to update audience");
+      setCampaign(json.data);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to update audience");
     }
   };
 
@@ -186,6 +240,23 @@ export default function CampaignDetailPage() {
         >
           {campaign.status}
         </span>
+      </div>
+
+      {/* Audience + live recipient count (#596/#222) */}
+      <div className="mb-6 p-4 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900">
+        <AudiencePicker
+          value={audienceFilter}
+          onChange={handleAudienceChange}
+          readOnly={!isDraft}
+          description={recipientDescription}
+        />
+        <p className="mt-3 text-sm text-zinc-600 dark:text-zinc-400">
+          {countLoading
+            ? "Calculating recipients..."
+            : recipientCount !== null
+              ? `Will send to ${recipientCount} subscriber${recipientCount === 1 ? "" : "s"}`
+              : null}
+        </p>
       </div>
 
       {/* Editor (draft only) */}
