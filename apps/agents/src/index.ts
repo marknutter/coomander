@@ -14,7 +14,7 @@ import {
 import { getChatConfig } from "./chat-config";
 import { appendMessageInternal, hydrateMessages } from "./persistence";
 import type { AgentTool, ToolContext } from "./types";
-import { makeScheduleFollowupTool } from "./tools";
+import { makeScheduleFollowupTool, generateImageTool } from "./tools";
 import { deliverTelegramFallback } from "./web-api";
 import {
   RealtimeChannel,
@@ -62,6 +62,16 @@ export type Env = {
   AI_GATEWAY_ID?: string;
   /** Gateway auth token (`cf-aig-authorization`) for an authenticated gateway. */
   AI_GATEWAY_TOKEN?: string;
+  /**
+   * Cloudflare API token, scoped to "Workers AI: Read", used two ways:
+   *  - Lets `wrangler dev` proxy the `[ai]` Workers AI binding to remote CF in
+   *    local/Docker dev (see .dev.vars.example).
+   *  - The `generate_image` tool (tools.ts) calls the Workers AI REST endpoint
+   *    for `@cf/black-forest-labs/flux-1-schnell` DIRECTLY (not via the AI
+   *    Gateway) with this token as a bearer credential. Production: set with
+   *    `wrangler secret put CLOUDFLARE_API_TOKEN --env production`.
+   */
+  CLOUDFLARE_API_TOKEN?: string;
   /**
    * Shared secret for server-to-server agent → web calls that happen without a
    * user cookie (scheduled wakes). Sent as `x-agents-internal-secret` to
@@ -312,13 +322,13 @@ export class AppAgent extends Agent<Env, AppAgentState> {
 
   /**
    * Worker-side tools exposed to the model on every chat turn:
-   * `schedule_followup` + anything registered via registerTool(). Coomander's
-   * domain tools (log_drop, advance_content_state) are NOT listed here — their
-   * definitions come from /api/coomander/agent-context each turn and the chat
-   * loop adds them itself (see chat.ts).
+   * `schedule_followup` + `generate_image` + anything registered via
+   * registerTool(). Coomander's domain tools (log_drop, advance_content_state)
+   * are NOT listed here — their definitions come from /api/coomander/agent-context
+   * each turn and the chat loop adds them itself (see chat.ts).
    */
   protected getTools(): AgentTool[] {
-    return [makeScheduleFollowupTool(this), ...this.extraTools];
+    return [makeScheduleFollowupTool(this), generateImageTool, ...this.extraTools];
   }
 
   /** Build the ToolContext handed to tool handlers for a given turn. */

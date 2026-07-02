@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import fs from "fs";
+import path from "path";
 
 describe("lib/storage backend selection (#291)", () => {
   const ORIGINAL_DRIVER = process.env.DATABASE_DRIVER;
@@ -127,5 +129,31 @@ describe("lib/storage backend selection (#291)", () => {
     // No R2 binding available in the test environment, so S3 is selected.
     const { getStorageBackendName } = await import("@/lib/storage");
     expect(getStorageBackendName()).toBe("s3");
+  });
+
+  describe("countStoredUnder (#222 follow-up — AI image daily quota)", () => {
+    const testPrefix = `ai-images/__test-user__/${Date.now()}/`;
+
+    afterEach(() => {
+      // Clean up any files this describe block wrote under data/uploads.
+      const dir = path.join(process.cwd(), "data", "uploads", testPrefix);
+      if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
+    });
+
+    it("returns 0 for a prefix with no stored objects (local backend)", async () => {
+      const { countStoredUnder } = await import("@/lib/storage");
+      expect(await countStoredUnder(testPrefix)).toBe(0);
+    });
+
+    it("counts objects uploaded under the prefix (local backend)", async () => {
+      const { _internal, countStoredUnder } = await import("@/lib/storage");
+      const backend = _internal.getBackend();
+      // The local-fs backend only ensures the top-level uploads dir — a slashed
+      // key's nested dirs must exist first (same as POST /api/images does).
+      fs.mkdirSync(path.join(process.cwd(), "data", "uploads", testPrefix), { recursive: true });
+      await backend.upload(`${testPrefix}a.png`, Buffer.from("a"), "image/png");
+      await backend.upload(`${testPrefix}b.png`, Buffer.from("b"), "image/png");
+      expect(await countStoredUnder(testPrefix)).toBe(2);
+    });
   });
 });

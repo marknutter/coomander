@@ -1,7 +1,14 @@
 "use client";
 
-import { useMemo } from "react";
-import { stripAllTags, stripSystemTags, stripTrailingPartialMarker } from "@coomander/core";
+import { Fragment, useMemo } from "react";
+import {
+  parseRichSegments,
+  stripAllTags,
+  stripSystemTags,
+  stripTrailingPartialMarker,
+  type RichSegment,
+} from "@coomander/core";
+import { ChatBlock } from "./chat/chat-blocks";
 
 function renderMarkdown(text: string): React.ReactNode[] {
   const lines = text.split("\n");
@@ -150,11 +157,21 @@ export function ChatMessageContent({ content, role }: { content: string; role: "
 
     // Assistant: hide a still-streaming partial block marker tail, then strip
     // backend system tags ([PROFILE:]/[STEP_*:]) while KEEPING [CHART:]/
-    // [IMAGE:] block markers intact (rendering them is a separate follow-on;
-    // this just ensures markers survive the strip pipeline instead of being
-    // mangled by a naive regex that mis-terminates on JSON array `]`s).
+    // [IMAGE:] block markers intact, then split into text + block segments and
+    // dispatch each block to <ChatBlock> (markdown renders in place for text).
     const cleaned = stripSystemTags(stripTrailingPartialMarker(content));
-    return <div>{renderMarkdown(cleaned)}</div>;
+    const segments = parseRichSegments(cleaned);
+    return (
+      <div>
+        {segments.map((seg: RichSegment, i: number) =>
+          seg.kind === "block" ? (
+            <ChatBlock key={i} block={seg} />
+          ) : (
+            <Fragment key={i}>{renderMarkdown(seg.text)}</Fragment>
+          ),
+        )}
+      </div>
+    );
   }, [content, role]);
 
   return rendered;

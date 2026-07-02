@@ -66,6 +66,29 @@ const WEB_SURFACES = [
 ].join("\n");
 
 /**
+ * Rich content (charts & images, #222 follow-up) — teaches the model the
+ * `[CHART:]`/`[IMAGE:]` marker syntax the web renderer (chat-message.tsx →
+ * ChatBlock) parses out of the reply via `parseRichSegments`. Write the marker
+ * EXACTLY as shown, on its own — the app renders it; the creator never sees the
+ * raw marker text. Mirrors the AppSeed template's rich-content prompt block.
+ */
+const RICH_CONTENT = [
+  "## Rich content (charts & images)",
+  "You can embed rich content inline by writing a marker on its own line. Write the marker EXACTLY as shown — the app renders it; the creator never sees the raw marker.",
+  "",
+  "**Charts** — to visualize data you actually have (e.g. beat counts, weekly ship totals), emit a chart marker:",
+  '[CHART:{"type":"bar","title":"Reels this week","labels":["Mon","Tue","Wed"],"series":[{"name":"Shipped","data":[2,1,3]}]}]',
+  '- "type" is one of: bar, line, pie, area.',
+  '- "labels" are the x-axis categories; each series\' "data" array lines up 1:1 with "labels".',
+  "- Chart ONLY real numbers from the conversation or the live ops state above — never invent data. If you don't have the data, say so instead of drawing a chart.",
+  "- Keep charts small (a few series, not hundreds of points).",
+  "",
+  "**Images** — to show a generated image, call the `generate_image` tool with a description. When it returns an image key, embed it:",
+  '[IMAGE:{"key":"<the key the tool returned>","alt":"<short description>"}]',
+  "- Only emit an [IMAGE:] marker with a key the `generate_image` tool actually returned this turn. Never fabricate a key.",
+].join("\n");
+
+/**
  * Build the fully rendered in-app chat system prompt for a user — the SAME
  * prompt the POST path uses, exported so the agents Worker contract route
  * (GET /api/coomander/agent-context, #192) can serve it to the WebSocket chat
@@ -82,7 +105,7 @@ export async function chatSystemPrompt(userId: string): Promise<string> {
   const history = turns.length
     ? `\n\nRecent conversation (oldest first):\n${turns.map((t) => `${t.role}: ${t.content}`).join("\n")}`
     : "";
-  return `${coomanderSystem(settings.personaMode)}\n\n${WEB_SURFACES}\n\nCurrent ops state:\n${stateCtx}${history}`;
+  return `${coomanderSystem(settings.personaMode)}\n\n${WEB_SURFACES}\n\n${RICH_CONTENT}\n\nCurrent ops state:\n${stateCtx}${history}`;
 }
 
 /**
