@@ -350,34 +350,48 @@ export class AppAgent extends Agent<Env, AppAgentState> {
   }
 
   /**
-   * Deliver a proactive message: push to any live WebSocket first; if none are
-   * connected, fall back to `onUndeliverable`. `conversationId` (when present)
-   * tells the client which thread the message was persisted into so it can
-   * render it in place. Returns how it was delivered.
+   * Deliver a proactive message by publishing to the user's realtime channel
+   * (`user:<userId>`), NOT this agent's own chat socket. The agent is a TENANT
+   * of the realtime layer (#222): proactive/scheduled delivery fans out through
+   * the generic RealtimeChannel DO (apps/agents/src/channel), while interactive
+   * chat streaming stays on this agent's `/agents/*` socket. The channel DO's
+   * `broadcast` returns how many sockets received the event; a count of 0 (no
+   * live subscriber) falls back to `onUndeliverable`. `conversationId` (when
+   * present) tells the client which thread the message was persisted into so
+   * it can render it in place. `this.name` is the gate-validated user id, and
+   * the channel's `authorizeChannel` lets a user subscribe to their own
+   * `user:` channel. Returns how it was delivered.
    */
   async deliverProactive(
     message: string,
     conversationId?: string,
   ): Promise<{ delivered: boolean; via: "ws" | "fallback" }> {
-    const hasConnection = [...this.getConnections()].length > 0;
-    if (hasConnection) {
-      this.broadcast(JSON.stringify({ type: "proactive", message, conversationId }));
-      return { delivered: true, via: "ws" };
-    }
+    const stub = this.env.REALTIME_CHANNEL.get(
+      this.env.REALTIME_CHANNEL.idFromName(`user:${this.name}`),
+    );
+    const res = await stub.fetch(
+      buildChannelPublishRequest({ type: "agent-message", message, conversationId }),
+    );
+    const { delivered } = (await res.json().catch(() => ({ delivered: 0 }))) as {
+      delivered?: number;
+    };
+    if ((delivered ?? 0) > 0) return { delivered: true, via: "ws" };
     await this.onUndeliverable(message);
     return { delivered: false, via: "fallback" };
   }
 
   /**
-   * Fallback when no socket is connected.
+   * Fallback when the realtime channel publish delivered to zero sockets (no
+   * live subscriber on `user:<userId>`).
    *
-   * ⚠️ COOMANDER DIVERGENCE from the AppSeed template (#192): the template
-   * persists an in-app notification (NotificationBell). Coomander's users live
-   * on Telegram — its cron pings and inbound classification already run over
-   * that channel — so an undeliverable proactive nudge is sent to Telegram via
-   * the internal `/api/internal/telegram-deliver` route (which uses the
-   * existing apps/web sendTelegram path). A user with no linked Telegram chat
-   * is a no-op on the web side; the reminder is still persisted to the thread.
+   * ⚠️ COOMANDER DIVERGENCE from the AppSeed template (#192, unchanged by
+   * #222): the template persists an in-app notification (NotificationBell).
+   * Coomander's users live on Telegram — its cron pings and inbound
+   * classification already run over that channel — so an undeliverable
+   * proactive nudge is sent to Telegram via the internal
+   * `/api/internal/telegram-deliver` route (which uses the existing apps/web
+   * sendTelegram path). A user with no linked Telegram chat is a no-op on the
+   * web side; the reminder is still persisted to the thread.
    */
   protected async onUndeliverable(message: string): Promise<void> {
     await deliverTelegramFallback(this.env, this.name, message);

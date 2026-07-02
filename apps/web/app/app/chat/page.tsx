@@ -26,6 +26,8 @@ import { stripTags } from "@/lib/chat-tags";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/lib/use-toast";
+import { authClient } from "@/lib/auth-client";
+import { useRealtime, type RealtimeEvent } from "@/lib/use-realtime";
 import type { AgentChatCallbacks, AgentChatHandle } from "@/lib/use-agent-chat";
 
 // Lazy bridge to the WebSocket Coomander transport (Cloudflare Agents SDK).
@@ -67,6 +69,10 @@ function CoomanderChat() {
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [audioEnabled, setAudioEnabled] = useState(false);
+  // Session user id — used only to subscribe to this user's realtime channel
+  // (agent-initiated proactive/scheduled messages, #222). Fetched once on
+  // mount, mirroring components/notification-bell.tsx.
+  const [userId, setUserId] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -120,6 +126,56 @@ function CoomanderChat() {
       });
   }, [loadThread, scrollToBottom]);
 
+  // Fetch the session user id so we can subscribe to this user's realtime
+  // channel below (agent-initiated proactive/scheduled messages, #222).
+  useEffect(() => {
+    authClient.getSession().then(({ data }) => {
+      const session = data as { user?: { id?: string } } | null;
+      if (session?.user?.id) setUserId(session.user.id);
+    });
+  }, []);
+
+  /**
+   * Handle an agent-initiated message pushed OUTSIDE any user turn — e.g. a
+   * `schedule_followup` reminder fired by the AppAgent. AppAgent.deliverProactive
+   * (apps/agents/src/index.ts) now publishes `{ type: "agent-message", message,
+   * conversationId }` to this user's `user:<id>` realtime channel (#222)
+   * instead of broadcasting a `proactive` frame down the chat socket — see the
+   * useRealtime subscription below. When it carries the thread id, the message
+   * was already persisted server-side, so reload the canonical thread (real
+   * id, ordering, tool side effects) rather than client-appending it. With no
+   * conversationId, fall back to a transient bubble. Behavior is unchanged from
+   * the old onProactive callback.
+   */
+  const handleAgentMessage = useCallback(
+    (message: string, conversationId?: string) => {
+      if (conversationId) {
+        loadThread().catch(() => {});
+      } else {
+        setMessages((m) => [
+          ...m,
+          { id: `proactive-${Date.now()}`, role: "assistant", content: message },
+        ]);
+      }
+    },
+    [loadThread],
+  );
+
+  useRealtime(
+    userId ? `user:${userId}` : null,
+    useCallback(
+      (event: RealtimeEvent) => {
+        if (event.type === "agent-message") {
+          handleAgentMessage(
+            event.message as string,
+            event.conversationId as string | undefined,
+          );
+        }
+      },
+      [handleAgentMessage],
+    ),
+  );
+
   // Callbacks the WebSocket bridge invokes. Coomander has one unified thread, so
   // the conversation id is always the "coomander" sentinel and there's nothing
   // to track per turn — on done/proactive we reload the canonical thread (real
@@ -156,19 +212,9 @@ function CoomanderChat() {
         wsResolveRef.current?.();
         wsResolveRef.current = null;
       },
-      // An agent-initiated message outside any user turn (a schedule_followup
-      // reminder). When it carries the thread id it was already persisted
-      // server-side — reload so it renders in place and survives refresh.
-      onProactive: (_message, conversationId) => {
-        if (conversationId) {
-          loadThread().catch(() => {});
-        } else {
-          setMessages((m) => [
-            ...m,
-            { id: `proactive-${Date.now()}`, role: "assistant", content: _message },
-          ]);
-        }
-      },
+      // Agent-initiated messages outside any user turn now arrive via the
+      // useRealtime("user:<id>") subscription + handleAgentMessage above, not
+      // this WS callback object (#222) — see lib/use-agent-chat.ts.
       onStatusChange: (status) => {
         // A mid-turn disconnect would otherwise leave the spinner forever.
         if (status === "closed" && wsTurnRef.current) {
