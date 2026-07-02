@@ -138,7 +138,9 @@ function CoomanderChat() {
   // sending until the socket is actually open (composing stays available).
   const [socketStatus, setSocketStatus] = useState<"connecting" | "open" | "closed">("connecting");
   // Whether the socket has ever opened — picks "Connecting…" vs "Reconnecting…".
-  const hasConnectedRef = useRef(false);
+  // State (not a ref) so it can be read during render; it flips at most once,
+  // alongside the socketStatus change that already drives the re-render.
+  const [hasConnected, setHasConnected] = useState(false);
 
   // Hydrate the unified thread (oldest-first) + ops-enabled state.
   const loadThread = useCallback(async () => {
@@ -259,7 +261,7 @@ function CoomanderChat() {
       onStatusChange: (status) => {
         setSocketStatus(status);
         if (status === "open") {
-          hasConnectedRef.current = true;
+          setHasConnected(true);
         }
         // A mid-turn disconnect would otherwise leave the spinner forever.
         if (status === "closed" && wsTurnRef.current) {
@@ -626,7 +628,7 @@ function CoomanderChat() {
           <Marker className="mx-auto max-w-2xl mb-2" role="status">
             <MarkerIcon><Loader2 className="w-3 h-3 animate-spin" /></MarkerIcon>
             <MarkerContent className="shimmer">
-              {hasConnectedRef.current ? "Reconnecting to Coomander…" : "Connecting to Coomander…"}
+              {hasConnected ? "Reconnecting to Coomander…" : "Connecting to Coomander…"}
             </MarkerContent>
           </Marker>
         )}
