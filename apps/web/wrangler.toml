@@ -37,8 +37,13 @@ assets = { directory = ".open-next/assets", binding = "ASSETS" }
 # lands. Keep in sync with custom-worker.ts CRON_SLOT and scheduling.ts.
 # Daily slots + the Sunday-evening weekly review ("0 1 * * 1" = Mon 01:00 UTC =
 # Sun 8pm CT; custom-worker.ts routes it to /api/coomander/weekly-review).
+#
+# The 15-minute expression is the campaign engine's recurring-jobs tick (#597,
+# epic #595, sync #222) — custom-worker.ts routes it to
+# /api/internal/campaign-cron, which dispatches due scheduled sends (and, once
+# the hardening follow-up lands, reconciles stuck sends).
 [triggers]
-crons = ["0 12 * * *", "0 18 * * *", "0 21 * * *", "0 1 * * *", "0 1 * * 1"]
+crons = ["0 12 * * *", "0 18 * * *", "0 21 * * *", "0 1 * * *", "0 1 * * 1", "*/15 * * * *"]
 
 # Plain env vars (non-secret). Secrets go through `wrangler secret put`.
 # Agents Worker (#192): AGENTS_INTERNAL_SECRET is a SECRET (not listed here) —
