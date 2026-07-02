@@ -111,7 +111,7 @@ cp -r .claude/skills/configure-sso   ~/.claude/skills/
 
 **`/coomander-sync`** — use from any downstream project to pull Coomander improvements in. Runs parallel exploration, diffs both repos, presents a checklist, creates a GH issue and branch.
 
-**`/configure-sso`** — use when setting up OAuth providers on a new deployment. Fully automates Microsoft via `az` CLI; walks through Google, GitHub, Facebook, and Apple step-by-step, writing all credentials to `.env.local` automatically. For Microsoft-only without Claude Code: `bash scripts/configure-microsoft-sso.sh`.
+**`/configure-sso`** — use when setting up OAuth providers on a new deployment. Walks through Google, GitHub, Facebook, and Apple step-by-step, writing all credentials to `.env.local` automatically.
 
 ## OpenClaw Skills
 

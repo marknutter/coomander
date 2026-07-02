@@ -81,7 +81,7 @@ If the tailnet hostname doesn't resolve on iPhone: open the Tailscale iOS app �
 
 ### OAuth callback URLs
 
-OAuth providers (Google, GitHub, Microsoft) need both URLs allow-listed:
+OAuth providers (Google, GitHub, etc.) need both URLs allow-listed:
 
 - `https://coomander.com/api/auth/callback/<provider>` — production
 - `https://coomander.gate-cardassian.ts.net/api/auth/callback/<provider>` — tailnet dev
@@ -984,21 +984,20 @@ discord: {
 },
 ```
 
-Also add it to `account.accountLinking.trustedProviders` and add a button in `app/auth/page.tsx`'s `SOCIAL_PROVIDERS` array (providers already included: Google, GitHub, Apple, Facebook, Microsoft).
+Also add it to `account.accountLinking.trustedProviders` and add a button in `app/auth/page.tsx`'s `SOCIAL_PROVIDERS` array (providers already included: Google, GitHub, Apple, Facebook).
 
 ### Configuring OAuth providers (getting the actual credentials)
 
-The five built-in SSO providers each require different steps to obtain credentials:
+The four built-in SSO providers each require different steps to obtain credentials:
 
 | Provider  | Automation level | Method |
 |-----------|-----------------|--------|
-| Microsoft | **Fully automated** | `az` CLI — no browser required |
 | Google    | Semi-automated | Browser-guided (3-minute walkthrough) |
 | GitHub    | Semi-automated | Browser-guided (2-minute walkthrough) |
 | Facebook  | Semi-automated | Browser-guided (~5 minutes) |
 | Apple     | Mostly guided  | Browser for setup, automated JWT generation |
 
-**If using Claude Code** — use the `/configure-sso` skill. It handles detection, automation, and guided walkthroughs for all five providers, writing credentials to `.env.local` automatically.
+**If using Claude Code** — use the `/configure-sso` skill. It handles detection, automation, and guided walkthroughs for all four providers, writing credentials to `.env.local` automatically.
 
 Install once:
 ```bash
@@ -1011,13 +1010,6 @@ Then from any downstream project:
 ```
 
 **If using OpenClaw** — the same skill is available. Install with `bash scripts/install-openclaw-skills.sh`, then use `/configure-sso` from any OpenClaw session. Uses OpenClaw's `browser` tool for automation instead of Chrome DevTools MCP.
-
-**Microsoft only (no Claude Code needed):**
-```bash
-bash scripts/configure-microsoft-sso.sh
-```
-
-Runs the full `az` CLI flow unattended and writes `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET`, and `MICROSOFT_TENANT_ID` to `.env.local`.
 
 **Apple-specific note:** `APPLE_CLIENT_SECRET` is a JWT that expires every 180 days. Set a calendar reminder to regenerate it — run `/configure-sso` and select Apple, or re-run the JWT generation step manually.
 
