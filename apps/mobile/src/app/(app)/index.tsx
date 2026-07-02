@@ -498,7 +498,7 @@ export default function CoomanderChatScreen() {
 
       <KeyboardAvoidingView
         style={styles.fill}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        behavior="padding"
         keyboardVerticalOffset={0}
       >
         {/* Messages / loading / empty */}

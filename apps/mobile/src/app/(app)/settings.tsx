@@ -10,7 +10,6 @@ import {
   Alert,
   Keyboard,
   KeyboardAvoidingView,
-  Platform,
   StyleSheet,
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
@@ -258,7 +257,7 @@ function TwoFactorEnableModal({
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <KeyboardAvoidingView
         style={styles.modalFill}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        behavior="padding"
       >
         <Pressable style={styles.modalOverlay} onPress={Keyboard.dismiss}>
           <Pressable style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -413,7 +412,7 @@ function TwoFactorDisableModal({
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <KeyboardAvoidingView
         style={styles.modalFill}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        behavior="padding"
       >
         <Pressable style={styles.modalOverlay} onPress={Keyboard.dismiss}>
           <Pressable style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -505,7 +504,7 @@ function DeleteAccountModal({
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <KeyboardAvoidingView
         style={styles.modalFill}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        behavior="padding"
       >
         <Pressable style={styles.modalOverlay} onPress={Keyboard.dismiss}>
           <Pressable style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -600,7 +599,7 @@ function EditNameModal({
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <KeyboardAvoidingView
         style={styles.modalFill}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        behavior="padding"
       >
         <Pressable style={styles.modalOverlay} onPress={Keyboard.dismiss}>
           <Pressable style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
