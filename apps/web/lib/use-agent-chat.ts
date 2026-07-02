@@ -73,6 +73,20 @@ export function useAgentChat(callbacks: AgentChatCallbacks): AgentChatHandle {
     cbRef.current = callbacks;
   });
   const openRef = useRef(false);
+  const mountedRef = useRef(false);
+
+  // partysocket auto-connects on mount and auto-reconnects with backoff, but it
+  // exposes no "connecting" event — so we synthesize one. Emitting "connecting"
+  // on mount gives the UI a real connect-in-progress signal during the (often
+  // multi-second) initial handshake instead of a dead/ambiguous state.
+  // Guarded on openRef in case the socket opened before this effect ran.
+  useEffect(() => {
+    mountedRef.current = true;
+    if (!openRef.current) cbRef.current.onStatusChange?.("connecting");
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const agent = useAgent({
     agent: "AppAgent",
@@ -85,6 +99,10 @@ export function useAgentChat(callbacks: AgentChatCallbacks): AgentChatHandle {
     onClose: () => {
       openRef.current = false;
       cbRef.current.onStatusChange?.("closed");
+      // partysocket will auto-reconnect with backoff (unless we're unmounting),
+      // so reflect that as a renewed "connecting" — the UI shows "reconnecting"
+      // rather than a terminal "closed".
+      if (mountedRef.current) cbRef.current.onStatusChange?.("connecting");
     },
     onError: () => {
       cbRef.current.onError("Connection error. Please try again.");

@@ -9,6 +9,7 @@ import {
   parseClientFrame,
   type BufferTurn,
   type ChatDeps,
+  type ServerFrame,
 } from "./chat";
 import { getChatConfig } from "./chat-config";
 import { appendMessageInternal, hydrateMessages } from "./persistence";
@@ -86,6 +87,30 @@ type ConnAuth = { cookie: string; validatedAt: number };
 function readConnAuth(connection: Connection): ConnAuth | null {
   const s = connection.state as ConnAuth | null;
   return s && typeof s.cookie === "string" ? s : null;
+}
+
+/**
+ * Send a JSON frame over a WebSocket connection WITHOUT ever throwing.
+ *
+ * A socket that closed mid-turn — network blip, DO hibernation, client
+ * navigation, reconnect churn — makes `connection.send()` throw
+ * `TypeError: Can't call WebSocket send() after close()`. If that escapes the
+ * chat loop, the turn dies with an uncaught error and NO done/error frame ever
+ * reaches the client, so the client spinner spins forever. Guarding on
+ * readyState (WebSocket.OPEN === 1) and try/catching turns that into a clean
+ * `false` return, letting `handleChatTurn` abandon the turn gracefully. Exported
+ * for unit testing.
+ */
+export function safeSend(connection: Connection, frame: ServerFrame): boolean {
+  // WebSocket.OPEN === 1. A CONNECTING/CLOSING/CLOSED socket can't take a frame.
+  if (connection.readyState !== 1) return false;
+  try {
+    connection.send(JSON.stringify(frame));
+    return true;
+  } catch (err) {
+    console.warn(`[AppAgent] dropped frame on a closed socket`, err);
+    return false;
+  }
 }
 
 /** Re-validate an open WebSocket's session at most this often. */
@@ -207,7 +232,7 @@ export class AppAgent extends Agent<Env, AppAgentState> {
       userId: this.name,
       cookie: auth.cookie,
       tools: this.getTools(),
-      send: (serverFrame) => connection.send(JSON.stringify(serverFrame)),
+      send: (serverFrame) => safeSend(connection, serverFrame),
       getBuffer: (conversationId) => this.getBuffer(auth.cookie, conversationId),
     };
 

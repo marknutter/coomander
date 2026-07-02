@@ -224,6 +224,31 @@ Cloudflare's AI Gateway analytics dataset has no `quantiles` field.) It requires
 **Account Analytics: Read**) + `CLOUDFLARE_ACCOUNT_ID` + `AI_GATEWAY_ID`. If any
 is unset, the dashboard shows a friendly empty-state.
 
+### Separate dev & prod usage
+
+Usage is bucketed **per AI Gateway** (`AI_GATEWAY_ID`) — not per token or per
+environment. By default dev and prod route through the same gateway, so their
+requests / tokens / cost **combine** in the `/admin/ai-usage` dashboard. To keep
+them separate (e.g. clean prod-only cost numbers):
+
+1. Create a second gateway in Cloudflare AI Gateway, e.g. `coomander-dev`. Make
+   it **unauthenticated** so dev needs no `AI_GATEWAY_TOKEN`.
+2. Point **dev** at it by overriding `AI_GATEWAY_ID` in two places:
+   - `apps/agents/.dev.vars` — routes the dev agents Worker's chat to the dev gateway
+   - `apps/web/.env` — filters the dev `/admin/ai-usage` dashboard to the dev gateway
+3. Leave **prod** on its gateway — `AI_GATEWAY_ID` in `apps/web/wrangler.toml` and
+   `apps/agents/wrangler.toml` `[vars]`.
+
+The single `CF_ANALYTICS_API_TOKEN` (Account Analytics: Read) reads **every**
+gateway in the account, so no extra token is needed — the prod and dev
+dashboards just filter to different gateways.
+
+> **Authenticated-gateway caveat:** if you instead share an **authenticated**
+> prod gateway with dev, the dev agents Worker must also carry
+> `AI_GATEWAY_TOKEN` (the `cf-aig-authorization` header) or its requests are
+> rejected with 401 and never reach the gateway analytics. A dedicated
+> unauthenticated dev gateway avoids this.
+
 ## API surface
 
 | Method | Path | Purpose |
