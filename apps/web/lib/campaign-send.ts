@@ -25,10 +25,12 @@
  * as `failed` email_events (visible in the admin UI), and a failed campaign can
  * be resent (resendCampaign) to just the recipients who never got it.
  *
- * NOTE: batch-boundary seams (enqueueCampaignSend / advanceBatchProgress /
- * finalizeIfComplete / recordFailedBatch) are kept clean of any
- * realtime/live-progress publishing — that's grafted on by a separate realtime
- * sync slice at integration time.
+ * Batch-boundary seams (enqueueCampaignSend / advanceBatchProgress /
+ * finalizeIfComplete / recordFailedBatch / resendCampaign) publish live
+ * progress via lib/campaign-realtime.ts — grafted on by the realtime sync
+ * slice (#222) so the admin campaign detail page updates with no manual
+ * refresh. Cadence is per-batch (size 50), not per-recipient, so a large send
+ * can't flood the channel.
  */
 
 import { and, eq, sql } from "drizzle-orm";
@@ -40,6 +42,7 @@ import { queryFirst, executeChanges } from "@/lib/db-helpers";
 import { enqueueJob, processJobs } from "@/lib/jobs";
 import { parseAudienceFilter, resolveAudience } from "@/lib/audiences";
 import { log } from "@/lib/logger";
+import { publishCampaignState } from "@/lib/campaign-realtime";
 
 export const CAMPAIGN_BATCH_JOB = "send-campaign-batch";
 
@@ -175,6 +178,9 @@ export async function enqueueCampaignSend(opts: CampaignSendOpts): Promise<{
   // silently no-op) this attempt's batch ids.
   await resetBatchTracking(campaignId);
 
+  // Baseline live event: watchers flip to "sending — 0 of N" immediately (#222).
+  await publishCampaignState(campaignId);
+
   if (recipients.length === 0) {
     // Empty audience — nothing to enqueue; finalize immediately.
     await db
@@ -183,6 +189,7 @@ export async function enqueueCampaignSend(opts: CampaignSendOpts): Promise<{
       .where(eq(emailCampaigns.id, campaignId))
       .run();
     log.info("[campaign-send] empty audience, finalized", { campaignId });
+    await publishCampaignState(campaignId);
     return { batches: 0, recipients: 0 };
   }
 
@@ -294,6 +301,8 @@ export async function resendCampaign(campaignId: string): Promise<{
   // from 0, so clear the prior attempt's idempotency rows first.
   await resetBatchTracking(campaignId);
 
+  await publishCampaignState(campaignId);
+
   if (unsent.length === 0) {
     // Everyone already got it — finalize straight to sent.
     await db
@@ -301,6 +310,7 @@ export async function resendCampaign(campaignId: string): Promise<{
       .set({ status: "sent", sent_at: now, updated_at: now })
       .where(eq(emailCampaigns.id, campaignId))
       .run();
+    await publishCampaignState(campaignId);
     return { batches: 0, recipients: 0, alreadySent: alreadySentCount };
   }
 
@@ -470,6 +480,7 @@ export async function recordFailedBatch(campaignId: string, count = 1): Promise<
     )
     .run();
   await finalizeIfComplete(campaignId);
+  await publishCampaignState(campaignId);
 }
 
 /**
@@ -511,6 +522,9 @@ async function advanceBatchProgress(campaignId: string, batchIndex: number): Pro
   }
 
   await finalizeIfComplete(campaignId);
+  // Per-batch live event (progress, or terminal on the finalizing batch). Cadence
+  // is per batch (size 50) so a large send never floods the channel DO (#222).
+  await publishCampaignState(campaignId);
 }
 
 /**

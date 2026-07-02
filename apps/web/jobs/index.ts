@@ -13,6 +13,7 @@ import { registerJob, enqueueJob, processJobs } from "@/lib/jobs";
 import { registerCron, startCron } from "@/lib/cron";
 import { executeChanges } from "@/lib/db-helpers";
 import { parseAudienceFilter, resolveAudience } from "@/lib/audiences";
+import { publishCampaignState } from "@/lib/campaign-realtime";
 
 // ─── Job Handlers ────────────────────────────────────────────────────────────
 
@@ -139,6 +140,8 @@ export async function dispatchScheduledCampaigns(): Promise<void> {
         .set({ status: "failed", updated_at: new Date().toISOString() })
         .where(eq(emailCampaigns.id, c.id))
         .run();
+      // Live-notify watchers that a scheduled send failed to dispatch (#222).
+      await publishCampaignState(c.id);
     }
   }
 
@@ -172,6 +175,17 @@ export async function reconcileStuckCampaigns(): Promise<void> {
     sql`${emailCampaigns.batches_done} + ${emailCampaigns.batches_failed} < ${emailCampaigns.batches_total}`,
   );
 
+  // Capture the ids about to be reconciled BEFORE the bulk update, so we can
+  // fan out a live "failed" event per campaign afterwards (#222) — the bulk
+  // UPDATE only returns a count. A campaign that finalizes on its own between
+  // this select and the update simply won't match the update; re-publishing its
+  // (now-terminal) state is still harmless since publishCampaignState reads live.
+  const stuck = await db
+    .select({ id: emailCampaigns.id })
+    .from(emailCampaigns)
+    .where(stuckPredicate)
+    .all();
+
   const changed = await executeChanges(
     db
       .update(emailCampaigns)
@@ -185,6 +199,11 @@ export async function reconcileStuckCampaigns(): Promise<void> {
 
   if (changed > 0) {
     log.warn("Reconciled stuck campaigns to failed", { count: changed, thresholdMinutes: STUCK_CAMPAIGN_MINUTES });
+    // Live-notify anyone watching a stuck campaign that it flipped to failed, so
+    // the detail page doesn't sit on "Sending… Updating live…" until a refresh.
+    for (const c of stuck) {
+      await publishCampaignState(c.id);
+    }
   }
 }
 

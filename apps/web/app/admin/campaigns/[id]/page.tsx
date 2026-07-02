@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Send, Eye, ArrowLeft, Mail, MousePointerClick, AlertTriangle, CalendarClock, XCircle } from "lucide-react";
 import { Button } from "@/components/ui";
 import { toast } from "@/lib/use-toast";
 import { cn } from "@/lib/cn";
+import { useRealtime, type RealtimeEvent } from "@/lib/use-realtime";
 import { AudiencePicker, parseAudienceFilter, ALL_AUDIENCE, type AudienceFilter } from "@/components/admin/audience-picker";
 
 interface Campaign {
@@ -127,17 +128,47 @@ export default function CampaignDetailPage() {
     }
   }, [campaign, fetchAnalytics]);
 
-  // No live-progress channel yet (that's grafted on by a separate realtime
-  // sync slice) — poll while a send is in flight so batch progress advances
-  // without a manual refresh.
-  const campaignStatus = campaign?.status;
+  // ── Live updates (#222) ────────────────────────────────────────────────
+  // Subscribe to the campaign's admin-only realtime channel so send progress
+  // and opens update with NO manual refresh. Degrades gracefully: if the
+  // agents Worker is unreachable the socket just retries in the background and
+  // the page still renders the last-fetched state (the user can still refresh).
+  const analyticsDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleRealtime = useCallback(
+    (event: RealtimeEvent) => {
+      if (event.type === "campaign-progress") {
+        setCampaign((prev) =>
+          prev
+            ? {
+                ...prev,
+                status: (event.status as string) ?? prev.status,
+                sent_count: (event.sentCount as number) ?? prev.sent_count,
+                recipient_count: (event.recipientCount as number) ?? prev.recipient_count,
+                batches_done: (event.batchesDone as number) ?? prev.batches_done,
+                batches_total: (event.batchesTotal as number) ?? prev.batches_total,
+                batches_failed: (event.batchesFailed as number) ?? prev.batches_failed,
+              }
+            : prev,
+        );
+      } else if (event.type === "campaign-opened") {
+        // Opens can arrive in bursts (Gmail/Apple image proxy prefetch). Coalesce
+        // into a single analytics refetch so the shown count matches the source
+        // of truth rather than drifting from client-side increments.
+        if (analyticsDebounce.current) clearTimeout(analyticsDebounce.current);
+        analyticsDebounce.current = setTimeout(() => {
+          fetchAnalytics();
+        }, 1000);
+      }
+    },
+    [fetchAnalytics],
+  );
+  useRealtime(campaign ? `campaign:${id}` : null, handleRealtime);
+
   useEffect(() => {
-    if (campaignStatus !== "sending") return;
-    const t = setInterval(() => {
-      fetchCampaign();
-    }, 4000);
-    return () => clearInterval(t);
-  }, [campaignStatus, fetchCampaign]);
+    return () => {
+      if (analyticsDebounce.current) clearTimeout(analyticsDebounce.current);
+    };
+  }, []);
 
   // Live recipient count — re-resolved whenever the audience filter changes
   // (light debounce so rapid tag clicks don't fire a request per click).
@@ -490,7 +521,7 @@ export default function CampaignDetailPage() {
             </div>
           </div>
 
-          {/* Sending progress — polled while status='sending' (no live channel yet) */}
+          {/* Sending progress — updates live via the realtime channel (#222) */}
           {isSending && (
             <p className="text-sm text-amber-600 dark:text-amber-400 flex items-center gap-2">
               <span
