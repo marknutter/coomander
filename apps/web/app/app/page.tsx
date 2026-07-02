@@ -28,6 +28,7 @@ import { toast } from "@/lib/use-toast";
 import { commandRegistry } from "@/lib/commands";
 import { CoomanderOnboarding, ONBOARDING_DISMISSED_KEY } from "@/components/coomander-onboarding";
 import { TelegramConnect } from "@/components/telegram-connect";
+import { RealtimeDemoCard } from "@/components/realtime-demo-card";
 
 // ── Types mirroring GET /api/coomander/home ─────────────────────────────────────
 interface HomeBeatLine {
@@ -217,6 +218,12 @@ function SecondarySurfaces() {
           body="The analytics surface — Instagram patterns, reach, and per-post breakdowns that ground Coomander's advice in your real numbers."
           cta="Open Insights"
         />
+        {/* Realtime ping demo (#222) — the runnable worked example of the
+            publish → RealtimeChannel DO → WebSocket → useRealtime round trip.
+            Lives in the same "detail behind the agent" grid as Cadence/Insights
+            rather than the primary agent-hero flow, since it's a technical demo,
+            not a Coomander feature. See content/docs/dev/realtime.mdx. */}
+        <RealtimeDemoCard />
       </div>
     </div>
   );
