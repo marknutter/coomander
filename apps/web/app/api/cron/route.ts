@@ -3,6 +3,7 @@ export const runtime = "nodejs";
 
 import { NextRequest, NextResponse } from "next/server";
 import { processJobs } from "@/lib/jobs";
+import { timingSafeEqualStr } from "@/lib/internal-auth";
 
 export async function GET(req: NextRequest) {
   const cronSecret = process.env.CRON_SECRET;
@@ -16,7 +17,7 @@ export async function GET(req: NextRequest) {
     ? authHeader.slice(7)
     : null;
 
-  if (token !== cronSecret) {
+  if (!token || !timingSafeEqualStr(token, cronSecret)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

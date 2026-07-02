@@ -1,3 +1,6 @@
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
 import { NextRequest, NextResponse } from "next/server";
 import { eq, like, desc, count } from "drizzle-orm";
 import { logAdminAction } from "@/lib/admin";
