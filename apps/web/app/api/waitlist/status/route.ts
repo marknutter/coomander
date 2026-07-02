@@ -1,11 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getRawAdapter } from "@/lib/db-raw";
+import { authRateLimit } from "@/lib/rate-limit";
 import { BadRequestError, errorResponse } from "@/lib/errors";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 export async function GET(request: NextRequest) {
+  // Unauthenticated endpoint keyed on an email — throttle to limit enumeration.
+  const limited = authRateLimit.check(request);
+  if (limited) return limited;
+
   try {
     const { searchParams } = new URL(request.url);
     const email = (searchParams.get("email") ?? "").trim().toLowerCase();
@@ -17,9 +22,9 @@ export async function GET(request: NextRequest) {
     const adapter = getRawAdapter();
 
     const entry = await adapter.queryFirst<{
-      id: number; referral_code: string; referral_count: number; status: string; created_at: string;
+      id: number; status: string; created_at: string;
     }>(
-      "SELECT id, referral_code, referral_count, status, created_at FROM waitlist WHERE email = ?",
+      "SELECT id, status, created_at FROM waitlist WHERE email = ?",
       email
     );
 
@@ -40,8 +45,6 @@ export async function GET(request: NextRequest) {
       onWaitlist: true,
       position: entry.status === "waiting" ? position?.pos ?? 0 : null,
       totalWaiting: totalWaiting?.total ?? 0,
-      referralCode: entry.referral_code,
-      referralCount: entry.referral_count,
       status: entry.status,
       joinedAt: entry.created_at,
     });

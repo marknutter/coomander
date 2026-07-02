@@ -261,7 +261,7 @@ function initPgDb(): AppDatabase {
  * Vitest without a manual setD1Binding call). Caller should throw a
  * helpful error in that case.
  */
-function resolveD1Binding(): D1Binding | null {
+export function resolveD1Binding(): D1Binding | null {
   if (d1Binding) return d1Binding;
   try {
     // Dynamic require so non-Workers builds (Vercel target) don't try to

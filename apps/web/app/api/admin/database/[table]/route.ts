@@ -3,6 +3,10 @@ import { logAdminAction } from "@/lib/admin";
 import { requirePermission } from "@/lib/rbac";
 import { PERMISSIONS } from "@/lib/permissions";
 import { getRawAdapter } from "@/lib/db-raw";
+import { ForbiddenError, errorResponse } from "@/lib/errors";
+
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 // Tables hidden from database browser (contain sensitive auth data)
 const RESTRICTED_TABLES = new Set(["session", "twoFactor", "verification"]);
@@ -11,6 +15,41 @@ const RESTRICTED_TABLES = new Set(["session", "twoFactor", "verification"]);
 const REDACTED_COLUMNS = new Set([
   "password", "secret", "backupCodes", "token", "value",
   "accessToken", "refreshToken", "idToken",
+]);
+
+// Write-protected columns per table. The generic database editor must never be
+// able to write privilege/billing/identity/ban fields — doing so is a vertical
+// privilege escalation (e.g. an admin with only `admin:database` flipping their
+// own `isAdmin` to 1 to bypass all RBAC). These fields are mutated exclusively
+// through the dedicated `/api/admin/users/[id]/*` routes, which apply the
+// correct authorization and side effects. Reads are unaffected — only writes
+// (PATCH) are blocked for these (table, column) pairs.
+const PROTECTED_COLUMNS_BY_TABLE: Record<string, Set<string>> = {
+  user: new Set([
+    "isAdmin",
+    "role",
+    "stripeCustomerId",
+    "stripeSubscriptionId",
+    "subscriptionStatus",
+    "plan",
+    "emailVerified",
+    "banned",
+    "banReason",
+    "banExpires",
+  ]),
+};
+
+// Tables that are read-only in the generic editor (PATCH and DELETE → 403).
+// Writing them here is equivalent to the user.isAdmin escalation the column
+// denylist blocks: `roles.permissions` grants your own role every permission,
+// `user_roles.role_id` re-points an assignment, `plan_overrides` defeats the
+// billing-column protection, and deleting from `admin_logs` tampers with the
+// audit trail. All four have dedicated, audited admin routes.
+const WRITE_PROTECTED_TABLES = new Set([
+  "roles",
+  "user_roles",
+  "plan_overrides",
+  "admin_logs",
 ]);
 
 function redactRows(rows: Record<string, unknown>[]): Record<string, unknown>[] {
@@ -128,6 +167,30 @@ export async function PATCH(
     return NextResponse.json({ error: "Cannot modify sensitive column" }, { status: 403 });
   }
 
+  // Read-only tables: RBAC/billing-override/audit tables must not be writable
+  // through the generic editor (vertical privilege escalation / audit tampering).
+  if (WRITE_PROTECTED_TABLES.has(table)) {
+    return errorResponse(
+      new ForbiddenError(
+        `Table "${table}" is read-only in the database editor. ` +
+          `Use the dedicated admin routes to modify it.`
+      )
+    );
+  }
+
+  // Block writes to privilege/billing/identity/ban columns. Allowing these
+  // through the generic editor enables vertical privilege escalation (e.g.
+  // setting your own user.isAdmin=1). They must be changed via the dedicated
+  // /api/admin/users/[id]/* routes, which enforce the correct authorization.
+  if (PROTECTED_COLUMNS_BY_TABLE[table]?.has(column)) {
+    return errorResponse(
+      new ForbiddenError(
+        `Cannot modify protected column "${column}" on table "${table}" via the database editor. ` +
+          `Use the dedicated /api/admin/users/[id]/* routes for this field.`
+      )
+    );
+  }
+
   const columnInfo = await adapter.getTableColumns(table);
   if (!columnInfo.some((c) => c.name === column)) {
     return NextResponse.json({ error: "Invalid column name" }, { status: 400 });
@@ -169,6 +232,17 @@ export async function DELETE(
   const validTables = await adapter.getTableNames();
   if (!validTables.has(table) || RESTRICTED_TABLES.has(table)) {
     return NextResponse.json({ error: "Invalid table name" }, { status: 400 });
+  }
+
+  // Read-only tables: deleting from RBAC/billing-override/audit tables via the
+  // generic editor is blocked (e.g. admin_logs DELETE = audit-trail tampering).
+  if (WRITE_PROTECTED_TABLES.has(table)) {
+    return errorResponse(
+      new ForbiddenError(
+        `Table "${table}" is read-only in the database editor. ` +
+          `Use the dedicated admin routes to modify it.`
+      )
+    );
   }
 
   const body = (await request.json()) as { id: unknown; confirm?: string };

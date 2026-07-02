@@ -49,22 +49,11 @@ function FacebookIcon() {
   );
 }
 
-function MicrosoftIcon() {
-  return (
-    <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none">
-      <path d="M0 0h11.377v11.372H0z" fill="#F25022" />
-      <path d="M12.623 0H24v11.372H12.623z" fill="#7FBA00" />
-      <path d="M0 12.628h11.377V24H0z" fill="#00A4EF" />
-      <path d="M12.623 12.628H24V24H12.623z" fill="#FFB900" />
-    </svg>
-  );
-}
-
 // ---------------------------------------------------------------------------
 // Social provider config — add/remove providers here
 // ---------------------------------------------------------------------------
 
-type SocialProvider = "google" | "github" | "apple" | "facebook" | "microsoft";
+type SocialProvider = "google" | "github" | "apple" | "facebook";
 
 const SOCIAL_PROVIDERS: Array<{
   id: SocialProvider;
@@ -75,7 +64,6 @@ const SOCIAL_PROVIDERS: Array<{
   { id: "apple",     label: "Apple",     icon: <AppleIcon /> },
   { id: "github",    label: "GitHub",    icon: <GitHubIcon /> },
   { id: "facebook",  label: "Facebook",  icon: <FacebookIcon /> },
-  { id: "microsoft", label: "Microsoft", icon: <MicrosoftIcon /> },
 ];
 
 // ---------------------------------------------------------------------------

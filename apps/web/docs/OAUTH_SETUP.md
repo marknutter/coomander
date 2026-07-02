@@ -100,16 +100,16 @@ Better Auth supports many OAuth providers. To add more:
    ```typescript
    socialProviders: {
      // ... existing providers
-     microsoft: {
-       clientId: process.env.MICROSOFT_CLIENT_ID || "",
-       clientSecret: process.env.MICROSOFT_CLIENT_SECRET || "",
+     discord: {
+       clientId: process.env.DISCORD_CLIENT_ID || "",
+       clientSecret: process.env.DISCORD_CLIENT_SECRET || "",
      },
    }
    ```
 
 2. Add button to `app/auth/page.tsx`:
    ```typescript
-   await authClient.signIn.social({ provider: "microsoft", callbackURL: "/app" });
+   await authClient.signIn.social({ provider: "discord", callbackURL: "/app" });
    ```
 
 3. Set up OAuth app with provider and add credentials to .env

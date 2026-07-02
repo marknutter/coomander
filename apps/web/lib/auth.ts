@@ -153,16 +153,11 @@ function buildAuth(): AuthInstance {
         clientId: process.env.FACEBOOK_CLIENT_ID || "",
         clientSecret: process.env.FACEBOOK_CLIENT_SECRET || "",
       },
-      microsoft: {
-        clientId: process.env.MICROSOFT_CLIENT_ID || "",
-        clientSecret: process.env.MICROSOFT_CLIENT_SECRET || "",
-        tenantId: process.env.MICROSOFT_TENANT_ID || "common",
-      },
     },
     account: {
       accountLinking: {
         enabled: true,
-        trustedProviders: ["google", "github", "apple", "facebook", "microsoft"],
+        trustedProviders: ["google", "github", "apple", "facebook"],
       },
     },
     user: {

@@ -1,7 +1,12 @@
+export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { rateLimit } from "@/lib/rate-limit";
+
+/** Maximum characters accepted for a single TTS request. */
+const MAX_TTS_TEXT_LENGTH = 5000;
 
 /**
  * POST /api/voice/speak
@@ -9,6 +14,9 @@ import { auth } from "@/lib/auth";
  * API key stays server-side — never exposed to client.
  */
 export async function POST(req: NextRequest) {
+  const limited = rateLimit.check(req);
+  if (limited) return limited;
+
   const session = await auth.api.getSession({ headers: req.headers });
   if (!session?.user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -23,8 +31,14 @@ export async function POST(req: NextRequest) {
 
   try {
     const { text } = await req.json();
-    if (!text) {
+    if (!text || typeof text !== "string") {
       return NextResponse.json({ error: "No text provided" }, { status: 400 });
+    }
+    if (text.length > MAX_TTS_TEXT_LENGTH) {
+      return NextResponse.json(
+        { error: `Text exceeds ${MAX_TTS_TEXT_LENGTH} character limit` },
+        { status: 400 }
+      );
     }
 
     const response = await fetch(

@@ -110,7 +110,7 @@ export function TableBrowser({ table, onError }: TableBrowserProps) {
     setPage(0);
   };
 
-  const pkCol = columns.find((c) => c.pk === 1);
+  const pkCol = columns.find((c) => c.pk);
 
   const openEdit = (row: Record<string, unknown>, colName: string) => {
     if (!pkCol) return;
