@@ -278,6 +278,15 @@ export async function handleChatTurn(deps: ChatDeps, frame: ClientFrame): Promis
 
   let assistantText = "";
   const usage: TurnUsage = { input_tokens: 0, output_tokens: 0 };
+  // streamText reports a stream-stopping error to this `onError` callback and
+  // simply ENDS the textStream — it does NOT reliably throw. A request the
+  // model rejects up front (e.g. an unprocessable image) ends the textStream
+  // empty without throwing, so the for-await loop below completes normally
+  // with no tokens. Capture the error here and surface it in the unified
+  // check after the try/catch; otherwise the turn would silently finalize as
+  // an empty `done` (and an empty assistant turn would get persisted) — the
+  // client then shows the user nothing: a sent message with no reply.
+  let streamError: unknown = null;
 
   // Lets us stop the model stream (and stop billing) the instant the client
   // socket drops mid-turn — see the send-returns-false bail below — or when
@@ -329,16 +338,20 @@ export async function handleChatTurn(deps: ChatDeps, frame: ClientFrame): Promis
       messages,
       maxOutputTokens: context.maxTokens,
       abortSignal: abortController.signal,
+      onError: ({ error }) => {
+        streamError = error;
+      },
       ...(Object.keys(aiTools).length > 0
         ? { tools: aiTools, stopWhen: stepCountIs(MAX_TOOL_ITERATIONS) }
         : {}),
       ...(headers ? { headers } : {}),
     });
 
-    // Iterating textStream throws on a stream-stopping error (network/provider
-    // error) per the AI SDK contract, so the try/catch routes it to an error
-    // frame instead of silently ending an empty stream. Stream deltas straight
-    // to the client as they arrive AND accumulate the full text.
+    // Some providers throw on a stream-stopping error (caught below); others
+    // (AI SDK v6's own error path) report it via `onError` above and just end
+    // textStream empty without throwing — the unified check after the
+    // try/catch handles both. Stream deltas straight to the client as they
+    // arrive AND accumulate the full text.
     armWatchdog();
     for await (const text of result.textStream) {
       // A chunk arrived — the model/stream is alive; reset the stall clock.
@@ -385,6 +398,17 @@ export async function handleChatTurn(deps: ChatDeps, frame: ClientFrame): Promis
     }
   } catch (err) {
     clearWatchdog();
+    // Some providers DO throw on a stream-stopping error; capture it the same
+    // way as the onError callback above so the single check below handles
+    // both delivery paths.
+    streamError = err;
+  }
+
+  // A turn fails either by throwing (caught above) or — more commonly for
+  // request-rejection errors — by ending the textStream empty and reporting
+  // via `onError`. Either way, surface a user-safe error frame and DON'T
+  // finalize: no empty `done` and no empty assistant turn persisted.
+  if (streamError) {
     // The socket-close bail above already handled this abort — no live socket
     // to send an error frame to, so stay silent.
     if (closedMidStream) return;
@@ -395,7 +419,7 @@ export async function handleChatTurn(deps: ChatDeps, frame: ClientFrame): Promis
       send({ type: "error", message: "The assistant stopped responding. Please try again." });
       return;
     }
-    console.error(`[AppAgent ${userId}] model stream error`, err);
+    console.error(`[AppAgent ${userId}] model stream error`, streamError);
     send({ type: "error", message: "Something went wrong. Please try again." });
     return;
   }
