@@ -56,11 +56,14 @@ export interface RawDbAdapter {
   transaction<T>(fn: (adapter: RawDbAdapter) => Promise<T>): Promise<T>;
 }
 
-import { isPg } from "./db-dialect";
+import { isPg, isD1 } from "./db-dialect";
 // Static imports — Vitest can resolve these where CommonJS require cannot.
-// Both adapter factories are lightweight (no side effects at module load).
+// All adapter factories are lightweight (no side effects at module load); the
+// D1 one only touches the binding when a method is called, so importing it on
+// non-D1 targets is harmless.
 import { createSqliteRawAdapter } from "./db-raw-sqlite";
 import { createPgRawAdapter } from "./db-raw-pg";
+import { createD1RawAdapter } from "./db-raw-d1";
 
 let _adapter: RawDbAdapter | null = null;
 
@@ -71,6 +74,10 @@ let _adapter: RawDbAdapter | null = null;
 export function getRawAdapter(): RawDbAdapter {
   if (_adapter) return _adapter;
 
-  _adapter = isPg() ? createPgRawAdapter() : createSqliteRawAdapter();
+  _adapter = isPg()
+    ? createPgRawAdapter()
+    : isD1()
+      ? createD1RawAdapter()
+      : createSqliteRawAdapter();
   return _adapter;
 }
