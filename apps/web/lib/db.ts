@@ -169,7 +169,11 @@ function bootstrapAdminUsers(db: InstanceType<typeof Database>): void {
   const adminEmails = process.env.ADMIN_EMAILS;
   if (adminEmails) {
     const emails = adminEmails.split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
-    const stmt = db.prepare("UPDATE user SET isAdmin = 1 WHERE LOWER(email) = ? AND isAdmin = 0");
+    // Sync the Better Auth admin-plugin `role` alongside isAdmin: the plugin's
+    // ban gate (session.create.before hook) keys off user.role ∈ adminRoles,
+    // our app keys off isAdmin, so they must stay in lockstep wherever an
+    // admin is granted.
+    const stmt = db.prepare("UPDATE user SET isAdmin = 1, role = 'admin' WHERE LOWER(email) = ? AND isAdmin = 0");
     for (const email of emails) {
       stmt.run(email);
     }
@@ -190,8 +194,8 @@ function seedDefaultAdmin(db: InstanceType<typeof Database>): void {
     const passwordHash = `${salt}:${key.toString("hex")}`;
 
     db.prepare(
-      `INSERT INTO user (id, email, emailVerified, name, createdAt, updatedAt, isAdmin, plan, subscriptionStatus)
-       VALUES (?, 'admin@example.com', 1, 'Admin', ?, ?, 1, 'free', 'inactive')`
+      `INSERT INTO user (id, email, emailVerified, name, createdAt, updatedAt, isAdmin, role, plan, subscriptionStatus)
+       VALUES (?, 'admin@example.com', 1, 'Admin', ?, ?, 1, 'admin', 'free', 'inactive')`
     ).run(userId, now, now);
 
     db.prepare(

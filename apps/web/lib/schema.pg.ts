@@ -29,7 +29,14 @@ export const user = pgTable("user", {
   stripeSubscriptionId: text("stripeSubscriptionId"),
   subscriptionStatus: text("subscriptionStatus").default("inactive"),
   isAdmin: integer("isAdmin").notNull().default(0),
+  // Legacy, unenforced-on-its-own flag — superseded by the Better Auth admin
+  // plugin's banned/banExpires below. Kept for display/back-compat.
   disabled: integer("disabled").notNull().default(0),
+  // Better Auth admin plugin (ban semantics) — see lib/schema.sqlite.ts.
+  role: text("role").default("user"),
+  banned: integer("banned").default(0),
+  banReason: text("banReason"),
+  banExpires: integer("banExpires"),
   // Coomander (#151): Telegram destination + opt-in flag for the ops agent.
   telegramChatId: text("telegramChatId"),
   coomanderEnabled: integer("coomanderEnabled").notNull().default(0),

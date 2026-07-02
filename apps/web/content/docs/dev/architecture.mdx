@@ -76,3 +76,14 @@ See [[conventions]] for auth patterns. Key points:
 - Server: `auth.api.getSession({ headers: request.headers })`
 - Client: `authClient.getSession()`, `authClient.signIn.email()`, etc.
 - Rate limited: 5 requests/minute on POST to auth endpoints
+- Better Auth's `admin` plugin (`lib/auth.ts`, `adminRoles: ["admin"]`) is
+  wired for **ban semantics only** (no impersonation UI). Admin
+  disable/enable (`PATCH /api/admin/users/[id]/status`) calls
+  `auth.api.banUser()` / `auth.api.unbanUser()`, which natively blocks
+  sign-in and revokes existing sessions via a `session.create.before` hook —
+  the legacy `user.disabled` column is unenforced on its own and kept only
+  for display/back-compat. The plugin's `role` column is synced to `"admin"`
+  everywhere `isAdmin=1` is set (`lib/db.ts` bootstrap/seed, the
+  `ADMIN_EMAILS` `databaseHooks` promotion in `lib/auth.ts`); `role` is
+  distinct from the RBAC `roles`/`userRoles` tables. Added in migration `023`
+  (SQLite) / `006` (PG).

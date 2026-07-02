@@ -1,5 +1,5 @@
 import { betterAuth } from "better-auth";
-import { twoFactor } from "better-auth/plugins";
+import { twoFactor, admin } from "better-auth/plugins";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { eq } from "drizzle-orm";
 import type Database from "better-sqlite3";
@@ -28,7 +28,7 @@ const appName = process.env.APP_NAME || "Coomander";
 // On the SQLite/PG paths the lazy init still happens, just on first access
 // instead of at import time — a one-time cost in exchange for D1 viability.
 
-type AuthInstance = ReturnType<typeof betterAuth>;
+type AuthInstance = ReturnType<typeof buildAuth>;
 
 let _authCache: AuthInstance | null = null;
 
@@ -83,7 +83,7 @@ function buildAuthDatabase(): Parameters<typeof betterAuth>[0]["database"] {
   return sqliteDb;
 }
 
-function buildAuth(): AuthInstance {
+function buildAuth() {
   return betterAuth({
     database: buildAuthDatabase(),
     secret: process.env.BETTER_AUTH_SECRET,
@@ -184,11 +184,34 @@ function buildAuth(): AuthInstance {
           defaultValue: "inactive",
           input: false,
         },
+        // NOTE: the admin-plugin gate field `role` (plus `banned` /
+        // `banReason` / `banExpires`) is NOT declared here — the admin()
+        // plugin (added below) owns those columns via its own schema.
+        // Declaring `role` here too would double-register the column.
+        // `role` is synced to "admin" wherever isAdmin=1 (lib/db.ts
+        // bootstrap + the ADMIN_EMAILS hook below).
       },
     },
     plugins: [
       twoFactor({
         issuer: appName,
+      }),
+      // Better Auth admin plugin — ban semantics only (no impersonation UI
+      // wired up). Adds user.role/banned/banReason/banExpires and a
+      // session.create.before hook that rejects sign-in for banned users and
+      // auto-lifts an expired ban. Admin "disable account" now calls
+      // auth.api.banUser(...) / "enable" calls auth.api.unbanUser(...),
+      // which natively blocks sign-in AND revokes existing sessions — the
+      // legacy user.disabled=1 column was never enforced anywhere.
+      //
+      // The plugin gates on user.role ∈ adminRoles; this app identifies
+      // admins by isAdmin=1, bridged by syncing role="admin" wherever
+      // isAdmin=1 is set (lib/db.ts bootstrapAdminUsers/seedDefaultAdmin,
+      // and the ADMIN_EMAILS databaseHooks promotion below), plus migration
+      // 023's one-time backfill.
+      admin({
+        defaultRole: "user",
+        adminRoles: ["admin"],
       }),
     ],
     databaseHooks: {
@@ -212,7 +235,9 @@ function buildAuth(): AuthInstance {
                 .filter(Boolean);
               if (allowed.includes(user.email.toLowerCase())) {
                 try {
-                  await getDb().update(userTable).set({ isAdmin: 1 }).where(eq(userTable.id, user.id));
+                  // Sync the admin-plugin `role` alongside isAdmin — see the
+                  // admin() plugin comment above.
+                  await getDb().update(userTable).set({ isAdmin: 1, role: "admin" }).where(eq(userTable.id, user.id));
                 } catch (e) {
                   console.warn("[auth] Failed to promote admin user:", (e as Error).message);
                 }

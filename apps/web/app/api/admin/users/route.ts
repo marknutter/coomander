@@ -43,10 +43,12 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  // `banned` (admin-plugin, enforced by Better Auth) is the source of truth;
+  // a legacy `disabled=1` row is still treated as disabled.
   if (status === "disabled") {
-    conditions.push("u.disabled = 1");
+    conditions.push("(u.banned = 1 OR u.disabled = 1)");
   } else if (status === "active") {
-    conditions.push("(u.disabled IS NULL OR u.disabled = 0)");
+    conditions.push("(u.banned IS NULL OR u.banned = 0) AND (u.disabled IS NULL OR u.disabled = 0)");
   }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
@@ -69,6 +71,7 @@ export async function GET(req: NextRequest) {
     isAdmin: number;
     subscriptionStatus: string;
     disabled: number | null;
+    banned: number | null;
     override_plan: string | null;
     override_expires_at: string | null;
   }>(
@@ -81,6 +84,7 @@ export async function GET(req: NextRequest) {
        u.${q("isAdmin")} AS "isAdmin",
        u.${q("subscriptionStatus")} AS "subscriptionStatus",
        u.disabled,
+       u.banned,
        po.plan AS override_plan,
        po.expires_at AS override_expires_at
      FROM ${userTable} u
@@ -105,7 +109,8 @@ export async function GET(req: NextRequest) {
       createdAt: u.createdAt,
       isAdmin: u.isAdmin === 1,
       subscriptionStatus: u.subscriptionStatus,
-      disabled: u.disabled === 1,
+      // `banned` is the enforced source of truth; legacy `disabled=1` also counts.
+      disabled: u.banned === 1 || u.disabled === 1,
     };
   });
 

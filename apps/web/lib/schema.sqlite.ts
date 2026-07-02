@@ -28,7 +28,18 @@ export const user = sqliteTable("user", {
   stripeSubscriptionId: text("stripeSubscriptionId"),
   subscriptionStatus: text("subscriptionStatus").default("inactive"),
   isAdmin: integer("isAdmin").notNull().default(0),
+  // Legacy, unenforced-on-its-own flag — superseded by the Better Auth admin
+  // plugin's banned/banExpires below (session.create.before hook rejects
+  // sign-in for banned users). Kept for display/back-compat; no new code
+  // should gate on it. See lib/auth.ts admin() plugin comment.
   disabled: integer("disabled").notNull().default(0),
+  // Better Auth admin plugin (ban semantics) — role is this app's admin gate
+  // bridge (synced to "admin" wherever isAdmin=1); banned/banReason/banExpires
+  // are enforced natively by the plugin's session-create hook.
+  role: text("role").default("user"),
+  banned: integer("banned").default(0),
+  banReason: text("banReason"),
+  banExpires: integer("banExpires"),
   // Coomander (#151): Telegram destination + opt-in flag for the ops agent.
   telegramChatId: text("telegramChatId"),
   coomanderEnabled: integer("coomanderEnabled").notNull().default(0),
