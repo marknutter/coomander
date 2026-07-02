@@ -10,6 +10,8 @@
     "theming",
     "---AI---",
     "ai-models",
+    "---Realtime---",
+    "realtime",
     "---Deployment---",
     "cloudflare-workers-compat"
   ]
