@@ -1,0 +1,83 @@
+---
+title: Rich Chat Blocks (foundation)
+description: The shared parser/stripper pipeline for inline non-markdown content (charts, images) in an assistant reply, and how the four chat surfaces consolidate on it.
+---
+
+# Rich Chat Blocks
+
+Coomander's chat pipeline has a **shared foundation** for rendering
+non-markdown content inline in an assistant reply — e.g. data **charts** or
+AI-generated **images** — even though no block renderer exists yet. The model
+would emit a JSON-carrying marker on its own; the app parses it out of the
+streamed text and (once a renderer ships) would render a React component in
+its place. This page documents the parsing/stripping foundation. Rendering
+charts/images inline is a separate, not-yet-implemented follow-on.
+
+## The marker format
+
+```
+[CHART:{"type":"bar","title":"Signups","labels":["Jan","Feb"],"series":[{"name":"Signups","data":[12,30]}]}]
+[IMAGE:{"key":"ai-images/<userId>/<uuid>.png","alt":"a mountain at sunrise"}]
+```
+
+A marker is `[<TYPE>:<json>]` where `<TYPE>` &isin; `CHART | IMAGE`. The payload
+is a JSON **object** — and because a chart's `data` arrays contain `]`, a naive
+`\[[A-Z_]+:[^\]]+\]` regex mis-terminates at the first inner `]`. Parsing uses a
+hand-written, brace-balanced, string-literal-aware scanner instead.
+
+**Today, nothing teaches the model this marker syntax** — `coomanderChat.ts`'s
+system prompt doesn't mention `[CHART:]`/`[IMAGE:]`, so in practice these
+markers never appear in a reply yet. The pipeline below exists so that when a
+future block-rendering surface is added, every consumer already handles
+markers correctly instead of mangling them.
+
+## The shared pipeline (`@coomander/core/chat/rich-blocks`)
+
+One module (`packages/core/src/chat/rich-blocks.ts`), used on every surface so
+they can't drift:
+
+| Function | Used by | Behaviour |
+|---|---|---|
+| `parseRichSegments(text)` | any future block renderer | splits text into ordered `{kind:"text"}` / `{kind:"block", type, json}` segments |
+| `stripSystemTags(text)` | agents worker persist + `done` frame, web assistant display | strips `[PROFILE:]/[STEP_*:]` system tags but **keeps** block markers |
+| `stripAllTags(text)` | user-message echo, **mobile**, **TTS** | strips everything (no block renderer there) |
+| `stripTrailingPartialMarker(text)` | web streaming | hides a still-streaming `[CHART:{"ty…` tail so it never flashes as raw text |
+
+**Key invariant:** the agents worker (`apps/agents/src/chat.ts`, via
+`stripTags` re-exported from `apps/agents/src/chat-config.ts`) persists
+assistant turns and the `done` frame with block markers **intact** (only
+system tags are stripped), so a future block renderer can re-render them after
+a reload. Mobile and TTS strip everything because neither has a native block
+renderer.
+
+## Where each surface consolidates
+
+Before this foundation, tag-stripping was duplicated four times, each with a
+slightly different (and in one case, badly broken) regex:
+
+- `apps/web/lib/chat-tags.ts` — `stripTags` now re-exports `stripSystemTags`.
+- `apps/web/components/chat-message.tsx` — `ChatMessageContent` uses
+  `stripAllTags` for user messages (echo, no blocks) and
+  `stripSystemTags(stripTrailingPartialMarker(content))` for the assistant
+  path.
+- `apps/agents/src/chat-config.ts` — `stripTags` now re-exports
+  `stripSystemTags`, consumed by `apps/agents/src/chat.ts`'s persist path and
+  `done` frame.
+- `apps/mobile/src/app/(app)/index.tsx` — local `stripTags` now delegates to
+  `stripAllTags`. Previously this only matched a literal `[TAG:\w+=\w+]`
+  pattern and would not have stripped `[CHART:]`/`[IMAGE:]` markers at all.
+
+## Adding a block-rendering surface later
+
+1. Add a `ChatBlock` dispatcher in `apps/web/components/` that consumes
+   `parseRichSegments()` output and renders each `{kind:"block"}` segment,
+   wrapped in an error boundary so a malformed payload degrades to a small
+   inline notice instead of crashing the message.
+2. Teach the model the marker syntax in `apps/web/lib/coomander/coomanderChat.ts`'s
+   system prompt (the single source of truth for the Coomander chat prompt —
+   NOT `apps/agents/src/chat-config.ts`, which only fetches the rendered
+   prompt per turn).
+3. If adding a new block type beyond `CHART`/`IMAGE`, extend
+   `BLOCK_MARKER_PREFIXES` + `PREFIX_TO_TYPE` in
+   `packages/core/src/chat/rich-blocks.ts` — the strip helpers automatically
+   pick up any prefix in that closed set.

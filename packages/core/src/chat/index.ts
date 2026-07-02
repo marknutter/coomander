@@ -22,6 +22,16 @@ export type {
   CostTier,
 } from "./model-catalog";
 
+// Rich chat blocks (inline charts/images) — shared parser + strippers.
+export {
+  BLOCK_MARKER_PREFIXES,
+  parseRichSegments,
+  stripTrailingPartialMarker,
+  stripSystemTags,
+  stripAllTags,
+} from "./rich-blocks";
+export type { RichSegment, BlockType } from "./rich-blocks";
+
 // Capability-gated multimodal message building + context trimming.
 export {
   applyContextWindow,

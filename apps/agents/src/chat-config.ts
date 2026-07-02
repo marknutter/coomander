@@ -141,10 +141,11 @@ export async function fetchAgentContext(env: Env, cookie: string): Promise<Agent
 }
 
 /**
- * Strip `[TAG:key=value]` tags from displayed text — mirror of the stripping
- * behavior in apps/web/lib/chat-tags.ts. Coomander's prompt doesn't emit tags
- * today, but the WS path keeps parity with the template chat loop.
+ * Strip backend "system tags" ([PROFILE:]/[STEP_*:]) from text that gets
+ * persisted and sent on the `done` frame — but PRESERVE rich-block markers
+ * ([CHART:]/[IMAGE:]) so inline charts/images survive persistence and
+ * re-render when the conversation reloads. Delegates to the single shared
+ * implementation in @coomander/core so every surface stays in sync — mirrors
+ * apps/web/lib/chat-tags.ts.
  */
-export function stripTags(text: string): string {
-  return text.replace(/\[[A-Z_]+:[^\]]+\]/g, "").trim();
-}
+export { stripSystemTags as stripTags } from "@coomander/core";
