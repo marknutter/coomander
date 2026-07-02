@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { Send, Eye, ArrowLeft, Mail, MousePointerClick, AlertTriangle } from "lucide-react";
+import { Send, Eye, ArrowLeft, Mail, MousePointerClick, AlertTriangle, CalendarClock, XCircle } from "lucide-react";
 import { Button } from "@/components/ui";
 import { toast } from "@/lib/use-toast";
 import { cn } from "@/lib/cn";
@@ -18,6 +18,9 @@ interface Campaign {
   audience_filter: string;
   recipient_count: number;
   sent_count: number;
+  batches_total: number;
+  batches_done: number;
+  batches_failed: number;
   scheduled_at: string | null;
   sent_at: string | null;
   created_at: string;
@@ -55,6 +58,11 @@ export default function CampaignDetailPage() {
   const [recipientCount, setRecipientCount] = useState<number | null>(null);
   const [recipientDescription, setRecipientDescription] = useState("");
   const [countLoading, setCountLoading] = useState(false);
+
+  // Schedule / cancel (#597/#222)
+  const [scheduleInput, setScheduleInput] = useState("");
+  const [scheduling, setScheduling] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
 
   const fetchCampaign = useCallback(async () => {
     try {
@@ -108,11 +116,28 @@ export default function CampaignDetailPage() {
     fetchCampaign();
   }, [fetchCampaign]);
 
+  // Fetch analytics once per status transition (not on every sent_count tick)
+  // so opens/clicks are visible while sending, after finalize, and on failure.
   useEffect(() => {
-    if (campaign && campaign.status === "sent") {
+    if (
+      campaign &&
+      (campaign.status === "sent" || campaign.status === "sending" || campaign.status === "failed")
+    ) {
       fetchAnalytics();
     }
   }, [campaign, fetchAnalytics]);
+
+  // No live-progress channel yet (that's grafted on by a separate realtime
+  // sync slice) — poll while a send is in flight so batch progress advances
+  // without a manual refresh.
+  const campaignStatus = campaign?.status;
+  useEffect(() => {
+    if (campaignStatus !== "sending") return;
+    const t = setInterval(() => {
+      fetchCampaign();
+    }, 4000);
+    return () => clearInterval(t);
+  }, [campaignStatus, fetchCampaign]);
 
   // Live recipient count — re-resolved whenever the audience filter changes
   // (light debounce so rapid tag clicks don't fire a request per click).
@@ -165,6 +190,56 @@ export default function CampaignDetailPage() {
     }
   };
 
+  const handleSchedule = async () => {
+    if (!scheduleInput) {
+      toast.error("Pick a date and time to schedule for");
+      return;
+    }
+    const when = new Date(scheduleInput);
+    if (Number.isNaN(when.getTime())) {
+      toast.error("Invalid date/time");
+      return;
+    }
+    if (when.getTime() <= Date.now()) {
+      toast.error("Scheduled time must be in the future");
+      return;
+    }
+    setScheduling(true);
+    try {
+      const res = await fetch(`/api/admin/campaigns/${id}/schedule`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scheduled_at: when.toISOString() }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Schedule failed");
+      setCampaign(json.data);
+      setScheduleInput("");
+      toast.success("Campaign scheduled");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Schedule failed");
+    } finally {
+      setScheduling(false);
+    }
+  };
+
+  const handleCancelSchedule = async () => {
+    setCancelling(true);
+    try {
+      const res = await fetch(`/api/admin/campaigns/${id}/cancel`, {
+        method: "POST",
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Cancel failed");
+      setCampaign(json.data);
+      toast.success("Schedule cancelled — campaign returned to draft");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Cancel failed");
+    } finally {
+      setCancelling(false);
+    }
+  };
+
   const handlePreview = async () => {
     setPreviewing(true);
     try {
@@ -201,6 +276,24 @@ export default function CampaignDetailPage() {
     }
   };
 
+  const handleResend = async () => {
+    if (!confirm("Resend this campaign to recipients who didn't receive it? Already-sent recipients are skipped.")) {
+      return;
+    }
+    setSending(true);
+    try {
+      const res = await fetch(`/api/admin/campaigns/${id}/resend`, { method: "POST" });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Resend failed");
+      setCampaign(json.data);
+      toast.success("Resending to unsent recipients");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Resend failed");
+    } finally {
+      setSending(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="p-6">
@@ -218,6 +311,8 @@ export default function CampaignDetailPage() {
   }
 
   const isDraft = campaign.status === "draft";
+  const isScheduled = campaign.status === "scheduled";
+  const isSending = campaign.status === "sending";
 
   return (
     <div className="p-6 max-w-4xl">
@@ -258,6 +353,44 @@ export default function CampaignDetailPage() {
               : null}
         </p>
       </div>
+
+      {/* Schedule / cancel / reschedule (#597/#222) — draft can schedule, scheduled can cancel or reschedule */}
+      {(isDraft || isScheduled) && (
+        <div className="mb-6 p-4 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 space-y-3">
+          <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Schedule</p>
+          {isScheduled && campaign.scheduled_at && (
+            <p className="text-sm text-zinc-600 dark:text-zinc-400">
+              Scheduled to send on {new Date(campaign.scheduled_at).toLocaleString()}
+            </p>
+          )}
+          <div className="flex flex-wrap items-center gap-3">
+            <input
+              type="datetime-local"
+              value={scheduleInput}
+              onChange={(e) => setScheduleInput(e.target.value)}
+              className="px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 text-sm focus:ring-2 focus:ring-ring focus:outline-none"
+            />
+            <Button
+              variant="secondary"
+              loading={scheduling}
+              icon={<CalendarClock className="w-4 h-4" />}
+              onClick={handleSchedule}
+            >
+              {isScheduled ? "Reschedule" : "Schedule"}
+            </Button>
+            {isScheduled && (
+              <Button
+                variant="danger"
+                loading={cancelling}
+                icon={<XCircle className="w-4 h-4" />}
+                onClick={handleCancelSchedule}
+              >
+                Cancel Schedule
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Editor (draft only) */}
       {isDraft ? (
@@ -334,7 +467,7 @@ export default function CampaignDetailPage() {
           </div>
         </div>
       ) : (
-        /* Read-only view for sent campaigns */
+        /* Read-only view for sending/sent/failed campaigns */
         <div className="space-y-4 mb-6">
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -356,6 +489,38 @@ export default function CampaignDetailPage() {
               </p>
             </div>
           </div>
+
+          {/* Sending progress — polled while status='sending' (no live channel yet) */}
+          {isSending && (
+            <p className="text-sm text-amber-600 dark:text-amber-400 flex items-center gap-2">
+              <span
+                className="inline-block w-2 h-2 rounded-full bg-amber-500 animate-pulse"
+                aria-hidden="true"
+              />
+              Sending in progress: {campaign.sent_count} sent
+              {campaign.batches_total > 0
+                ? ` (batch ${campaign.batches_done} of ${campaign.batches_total})`
+                : ""}
+              .
+            </p>
+          )}
+
+          {/* Failed send — offer an idempotent resend to the recipients who didn't get it */}
+          {campaign.status === "failed" && (
+            <div className="rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 p-4 space-y-2">
+              <p className="text-sm text-red-700 dark:text-red-300">
+                Send did not complete: {campaign.sent_count} of {campaign.recipient_count} delivered
+                {campaign.batches_failed > 0 ? `, ${campaign.batches_failed} batch(es) failed` : ""}.
+              </p>
+              <button
+                onClick={handleResend}
+                disabled={sending}
+                className="px-3 py-2 text-sm font-medium bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white rounded-md transition-colors"
+              >
+                {sending ? "Resending…" : "Resend to unsent recipients"}
+              </button>
+            </div>
+          )}
 
           {/* Analytics */}
           {analytics && (

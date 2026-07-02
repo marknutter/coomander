@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { processCampaignBatch, type CampaignBatchPayload } from "@/lib/campaign-send";
+import { processCampaignBatch, recordFailedBatch, type CampaignBatchPayload } from "@/lib/campaign-send";
 import { timingSafeEqualStr } from "@/lib/internal-auth";
 import { log } from "@/lib/logger";
 
@@ -13,6 +13,11 @@ const SCOPE = "api/internal/campaign-batch";
  * epic #595, sync #222). Called by the CAMPAIGN_QUEUE consumer
  * (lib/queue-consumer.ts, on Workers) or the dev SQLite/D1 job-queue drain
  * (lib/jobs.ts, off Workers) — never reachable by browsers.
+ *
+ * `?dead=1` (hardening follow-up): the message arrived on the dead-letter
+ * queue after exhausting CF Queue's retries. Instead of trying to send again,
+ * record the whole batch as permanently failed (recordFailedBatch) so the
+ * campaign finalizes to 'failed' rather than stalling in 'sending' forever.
  *
  * Auth mirrors the agents-worker internal pattern (see
  * app/api/internal/telegram-deliver/route.ts): a shared AGENTS_INTERNAL_SECRET
@@ -41,6 +46,17 @@ export async function POST(request: NextRequest) {
 
   if (!payload?.campaignId || !Array.isArray(payload?.recipients)) {
     return NextResponse.json({ error: "invalid batch payload" }, { status: 400 });
+  }
+
+  const dead = new URL(request.url).searchParams.get("dead") === "1";
+  if (dead) {
+    log.warn("[campaign-batch] dead-lettered batch, recording as failed", {
+      scope: SCOPE,
+      campaignId: payload.campaignId,
+      recipients: payload.recipients.length,
+    });
+    await recordFailedBatch(payload.campaignId);
+    return NextResponse.json({ ok: true, deadLettered: true });
   }
 
   try {

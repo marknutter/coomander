@@ -39,10 +39,26 @@ const CRON_SLOT = {
 // both run and event.cron distinguishes them.
 const WEEKLY_REVIEW_CRON = "0 1 * * 1";
 
+// Campaign engine recurring jobs (#597, epic #595, sync #222): dispatching due
+// scheduled sends. Every 15 minutes, matching wrangler.toml [triggers].
+const CAMPAIGN_CRON = "*/15 * * * *";
+
 async function post(path, env, ctx, payload) {
   const req = new Request(`https://coomander.com${path}`, {
     method: "POST",
     headers: { "content-type": "application/json", "x-agent-secret": env.COOMANDER_RUN_SECRET ?? "" },
+    body: JSON.stringify(payload),
+  });
+  return handler.fetch(req, env, ctx);
+}
+
+// Internal routes protected by AGENTS_INTERNAL_SECRET (Coomander's existing
+// server-to-server shared-secret pattern — see lib/internal-auth.ts), NOT
+// COOMANDER_RUN_SECRET above and deliberately NOT AppSeed's CRON_SECRET.
+async function postInternal(path, env, ctx, payload) {
+  const req = new Request(`https://coomander.com${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-agents-internal-secret": env.AGENTS_INTERNAL_SECRET ?? "" },
     body: JSON.stringify(payload),
   });
   return handler.fetch(req, env, ctx);
@@ -55,6 +71,11 @@ const worker = {
     if (event.cron === WEEKLY_REVIEW_CRON) {
       const res = await post("/api/coomander/weekly-review", env, ctx, {});
       console.log(`[cron] coomander weekly-review cron="${event.cron}" -> ${res.status} ${await res.text().catch(() => "")}`);
+      return;
+    }
+    if (event.cron === CAMPAIGN_CRON) {
+      const res = await postInternal("/api/internal/campaign-cron", env, ctx, {});
+      console.log(`[cron] campaign-cron cron="${event.cron}" -> ${res.status} ${await res.text().catch(() => "")}`);
       return;
     }
     const slot = CRON_SLOT[event.cron] ?? "check";

@@ -1,5 +1,6 @@
 /**
- * Campaign send engine — batched producer/consumer (#454, epic #595, sync #222).
+ * Campaign send engine — batched producer/consumer (#454, epic #595, sync #222),
+ * hardened against at-scale failures (hardening follow-up, sync #222).
  *
  * Replaces the old inline "one request sends every email sequentially" loop
  * (lib/broadcasts.ts → sendCampaignDirect) which dies on Workers CPU/wall-clock
@@ -17,12 +18,17 @@
  * The consumer logic (processCampaignBatch) is identical across transports — it
  * sends one tracked email per recipient, records a `sent` event for delivery
  * correlation, increments sent_count, and is idempotent per (campaign,
- * recipient) so a retried batch never double-sends. The campaign finalizes to
- * status='sent' when batches_done == batches_total (order-independent).
+ * recipient) so a retried batch never double-sends. A campaign finalizes to
+ * 'sent' once batches_done + batches_failed >= batches_total and none failed,
+ * else 'failed' — so a dropped/retry-exhausted batch no longer strands the
+ * campaign in 'sending' forever. Permanent per-recipient failures are recorded
+ * as `failed` email_events (visible in the admin UI), and a failed campaign can
+ * be resent (resendCampaign) to just the recipients who never got it.
  *
  * NOTE: batch-boundary seams (enqueueCampaignSend / advanceBatchProgress /
- * finalizeIfComplete) are kept clean of any realtime/live-progress publishing —
- * that's grafted on by a separate realtime sync slice at integration time.
+ * finalizeIfComplete / recordFailedBatch) are kept clean of any
+ * realtime/live-progress publishing — that's grafted on by a separate realtime
+ * sync slice at integration time.
  */
 
 import { and, eq, sql } from "drizzle-orm";
@@ -32,6 +38,7 @@ import { getDb } from "@/lib/db";
 import { emailCampaigns, emailEvents } from "@/lib/schema";
 import { queryFirst, executeChanges } from "@/lib/db-helpers";
 import { enqueueJob, processJobs } from "@/lib/jobs";
+import { parseAudienceFilter, resolveAudience } from "@/lib/audiences";
 import { log } from "@/lib/logger";
 
 export const CAMPAIGN_BATCH_JOB = "send-campaign-batch";
@@ -108,6 +115,18 @@ async function alreadySent(campaignId: string, email: string): Promise<boolean> 
   return !!row;
 }
 
+/** All recipient emails that already have a `sent` event for this campaign,
+ * in one query (for bulk unsent-filtering without an N+1). */
+async function sentEmailSet(campaignId: string): Promise<Set<string>> {
+  const db = getDb();
+  const rows = await db
+    .select({ email: emailEvents.subscriber_email })
+    .from(emailEvents)
+    .where(and(eq(emailEvents.campaign_id, campaignId), eq(emailEvents.event_type, "sent")))
+    .all();
+  return new Set(rows.map((r) => r.email).filter((e): e is string => !!e));
+}
+
 /**
  * Producer: split the resolved recipients into batches, record progress
  * targets, and enqueue each batch. Returns immediately (the batches are sent
@@ -133,6 +152,7 @@ export async function enqueueCampaignSend(opts: CampaignBatchPayload): Promise<{
       sent_count: 0,
       batches_total: chunk(recipients, CAMPAIGN_BATCH_SIZE).length,
       batches_done: 0,
+      batches_failed: 0,
       updated_at: now,
     })
     .where(eq(emailCampaigns.id, campaignId))
@@ -187,6 +207,66 @@ async function enqueueBatches(
   }
 
   return { batches: batches.length, recipients: recipients.length };
+}
+
+/**
+ * Re-dispatch a campaign to the recipients in its audience that DON'T yet have
+ * a `sent` event — for recovering a `failed` (or partially-sent) campaign.
+ * Idempotent: already-sent recipients are excluded up front and skipped again
+ * by the consumer, so no one is emailed twice. Preserves recipient_count/
+ * sent_count; resets batch progress to the outstanding remainder and
+ * status→sending.
+ */
+export async function resendCampaign(campaignId: string): Promise<{
+  batches: number;
+  recipients: number;
+  alreadySent: number;
+}> {
+  const db = getDb();
+  const campaign = await queryFirst(
+    db.select().from(emailCampaigns).where(eq(emailCampaigns.id, campaignId)),
+  );
+  if (!campaign) throw new Error("[campaign-send] resend: campaign not found");
+
+  const filter = parseAudienceFilter(campaign.audience_filter);
+  const audience = await resolveAudience(filter);
+
+  // One query for who's already been sent (vs. an await-per-member N+1).
+  const sentSet = await sentEmailSet(campaignId);
+  const unsent = audience.filter((email) => !sentSet.has(email));
+  const alreadySentCount = audience.length - unsent.length;
+  const now = new Date().toISOString();
+
+  // Reset batch progress to the remainder; PRESERVE sent_count. Recompute
+  // recipient_count to the CURRENT resolved audience so the "N of M delivered"
+  // ratio stays consistent even if the audience grew/shrank since the first
+  // send (re-resolving live could otherwise desync recipient_count from
+  // sent_count).
+  await db
+    .update(emailCampaigns)
+    .set({
+      status: "sending",
+      recipient_count: audience.length,
+      batches_total: chunk(unsent, CAMPAIGN_BATCH_SIZE).length,
+      batches_done: 0,
+      batches_failed: 0,
+      updated_at: now,
+    })
+    .where(eq(emailCampaigns.id, campaignId))
+    .run();
+
+  if (unsent.length === 0) {
+    // Everyone already got it — finalize straight to sent.
+    await db
+      .update(emailCampaigns)
+      .set({ status: "sent", sent_at: now, updated_at: now })
+      .where(eq(emailCampaigns.id, campaignId))
+      .run();
+    return { batches: 0, recipients: 0, alreadySent: alreadySentCount };
+  }
+
+  const result = await enqueueBatches(campaignId, campaign.subject, campaign.html_content, unsent);
+  return { ...result, alreadySent: alreadySentCount };
 }
 
 /**
@@ -265,6 +345,18 @@ export async function processCampaignBatch(payload: CampaignBatchPayload): Promi
           .set({ sent_count: sql`${emailCampaigns.sent_count} + 1` })
           .where(eq(emailCampaigns.id, campaignId))
           .run();
+        // Clear any stale `failed` row for this recipient — a resend that now
+        // succeeds should not leave the recipient counted as dropped.
+        await db
+          .delete(emailEvents)
+          .where(
+            and(
+              eq(emailEvents.campaign_id, campaignId),
+              eq(emailEvents.subscriber_email, to),
+              eq(emailEvents.event_type, "failed"),
+            ),
+          )
+          .run();
       }
     } catch (err) {
       if (isRateLimitError(err)) {
@@ -277,17 +369,68 @@ export async function processCampaignBatch(payload: CampaignBatchPayload): Promi
         throw err;
       }
       // Permanent per-recipient failure (e.g. a malformed address). Don't stall
-      // the batch — log and move on. Dropped-recipient tracking + resend land in
-      // the hardening follow-up.
+      // the batch, but RECORD it as a `failed` event so the recipient_count vs
+      // sent_count gap is explainable and the admin can see who was dropped.
       log.error("[campaign-send] permanent send failure", {
         campaignId,
         to,
         error: err instanceof Error ? err.message : String(err),
       });
+      await recordFailedRecipient(campaignId, to, err instanceof Error ? err.message : String(err));
     }
   }
 
   await advanceBatchProgress(campaignId);
+}
+
+/** Record a permanent per-recipient send failure as a `failed` event (deduped
+ * by the migration-026 partial unique index), with the error in metadata. */
+async function recordFailedRecipient(campaignId: string, email: string, error: string): Promise<void> {
+  const db = getDb();
+  try {
+    await db
+      .insert(emailEvents)
+      .values({
+        campaign_id: campaignId,
+        subscriber_email: email,
+        event_type: "failed",
+        metadata: JSON.stringify({ error: error.slice(0, 500) }),
+      })
+      .onConflictDoNothing()
+      .run();
+  } catch (e) {
+    log.error("[campaign-send] failed to record failed event", {
+      campaignId,
+      email,
+      error: e instanceof Error ? e.message : String(e),
+    });
+  }
+}
+
+/**
+ * Record a whole batch as permanently failed (dead-letter / stuck
+ * reconciliation) and re-evaluate finalize. Called by the DLQ consumer and the
+ * reconciler, never on the happy path.
+ */
+export async function recordFailedBatch(campaignId: string, count = 1): Promise<void> {
+  const db = getDb();
+  // Guard the increment on status='sending' AND still-outstanding batches, so a
+  // redelivered dead-letter message (CF Queues is at-least-once) can't push
+  // batches_failed past batches_total or bump it after the campaign already
+  // finalized — the increment is naturally idempotent-enough without a
+  // per-batch dedup table.
+  await db
+    .update(emailCampaigns)
+    .set({ batches_failed: sql`${emailCampaigns.batches_failed} + ${count}`, updated_at: new Date().toISOString() })
+    .where(
+      and(
+        eq(emailCampaigns.id, campaignId),
+        eq(emailCampaigns.status, "sending"),
+        sql`${emailCampaigns.batches_done} + ${emailCampaigns.batches_failed} < ${emailCampaigns.batches_total}`,
+      ),
+    )
+    .run();
+  await finalizeIfComplete(campaignId);
 }
 
 /**
@@ -304,24 +447,37 @@ async function advanceBatchProgress(campaignId: string): Promise<void> {
 }
 
 /**
- * Finalize a campaign to 'sent' once every batch has completed
- * (batches_done >= batches_total). The UPDATE is guarded on status='sending',
- * so concurrent batches racing to the threshold finalize exactly once.
+ * Finalize a campaign once every batch is accounted for
+ * (batches_done + batches_failed >= batches_total): to 'sent' when none
+ * failed, else 'failed' (partially sent — sent_count reflects the
+ * successes). The UPDATE is guarded on status='sending', so concurrent
+ * batches racing to the threshold finalize exactly once.
  */
 export async function finalizeIfComplete(campaignId: string): Promise<void> {
   const db = getDb();
   const now = new Date().toISOString();
 
+  // Decide AND write in a single atomic statement against LIVE column values.
+  // A separate SELECT-then-UPDATE would be a TOCTOU race: a success-finalize
+  // that read batches_failed=0 could otherwise win the write and mask a batch
+  // that failed concurrently (e.g. the DLQ consumer running as a separate
+  // Worker invocation). The status is chosen by SQL CASE from the current row,
+  // and the status='sending' + threshold guards make it fire exactly once.
+  // Mirrors reconcileStuckCampaigns in jobs/index.ts.
   const changed = await executeChanges(
     db
       .update(emailCampaigns)
-      .set({ status: "sent", sent_at: now, updated_at: now })
+      .set({
+        status: sql`CASE WHEN ${emailCampaigns.batches_failed} > 0 THEN 'failed' ELSE 'sent' END`,
+        sent_at: now,
+        updated_at: now,
+      })
       .where(
         and(
           eq(emailCampaigns.id, campaignId),
           eq(emailCampaigns.status, "sending"),
           sql`${emailCampaigns.batches_total} > 0`,
-          sql`${emailCampaigns.batches_done} >= ${emailCampaigns.batches_total}`,
+          sql`${emailCampaigns.batches_done} + ${emailCampaigns.batches_failed} >= ${emailCampaigns.batches_total}`,
         ),
       ),
   );

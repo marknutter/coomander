@@ -31,6 +31,8 @@ interface QueueMessageLike {
 
 interface QueueBatchLike {
   messages: QueueMessageLike[];
+  /** The queue this batch came from; the dead-letter queue ends with "-dlq". */
+  queue?: string;
 }
 
 interface ExecutionContextLike {
@@ -47,12 +49,15 @@ type FetchHandler = (
 
 /** Build the internal request that runs one campaign batch, or null if the
  * worker isn't configured (no AGENTS_INTERNAL_SECRET → batches are retried
- * until set). */
-export function buildCampaignBatchRequest(body: unknown, env: QueueEnv): Request | null {
+ * until set). When `dead` is true the batch is instead recorded as a
+ * permanently-failed batch (dead-letter path, hardening follow-up) so the
+ * campaign finalizes to 'failed' rather than sitting in 'sending' forever. */
+export function buildCampaignBatchRequest(body: unknown, env: QueueEnv, dead = false): Request | null {
   const secret = env.AGENTS_INTERNAL_SECRET;
   if (!secret) return null;
   const base = env.APP_URL || env.BETTER_AUTH_URL || "https://localhost";
   const url = new URL("/api/internal/campaign-batch", base);
+  if (dead) url.searchParams.set("dead", "1");
   return new Request(url.toString(), {
     method: "POST",
     headers: {
@@ -73,8 +78,12 @@ export async function handleQueueBatch(
   ctx: ExecutionContextLike,
   fetchHandler: FetchHandler,
 ): Promise<void> {
+  // Batches arriving on the dead-letter queue exhausted their retries — record
+  // them as failed batches instead of trying to send again (hardening
+  // follow-up).
+  const dead = typeof batch.queue === "string" && batch.queue.endsWith("-dlq");
   for (const message of batch.messages) {
-    const req = buildCampaignBatchRequest(message.body, env);
+    const req = buildCampaignBatchRequest(message.body, env, dead);
     if (!req) {
       console.warn("[campaign-queue] no AGENTS_INTERNAL_SECRET configured — retrying batch later");
       message.retry();

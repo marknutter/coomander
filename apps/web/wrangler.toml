@@ -37,8 +37,13 @@ assets = { directory = ".open-next/assets", binding = "ASSETS" }
 # lands. Keep in sync with custom-worker.ts CRON_SLOT and scheduling.ts.
 # Daily slots + the Sunday-evening weekly review ("0 1 * * 1" = Mon 01:00 UTC =
 # Sun 8pm CT; custom-worker.ts routes it to /api/coomander/weekly-review).
+#
+# The 15-minute expression is the campaign engine's recurring-jobs tick (#597,
+# epic #595, sync #222) — custom-worker.ts routes it to
+# /api/internal/campaign-cron, which dispatches due scheduled sends (and, once
+# the hardening follow-up lands, reconciles stuck sends).
 [triggers]
-crons = ["0 12 * * *", "0 18 * * *", "0 21 * * *", "0 1 * * *", "0 1 * * 1"]
+crons = ["0 12 * * *", "0 18 * * *", "0 21 * * *", "0 1 * * *", "0 1 * * 1", "*/15 * * * *"]
 
 # Plain env vars (non-secret). Secrets go through `wrangler secret put`.
 # Agents Worker (#192): AGENTS_INTERNAL_SECRET is a SECRET (not listed here) —
@@ -116,6 +121,29 @@ queue = "coomander-campaign-send"
 queue = "coomander-campaign-send"
 max_batch_size = 10
 max_batch_timeout = 5
+max_retries = 5
+# RECOMMENDED for prod: a dead-letter queue so a batch that exhausts
+# max_retries (e.g. sustained rate-limiting) lands somewhere inspectable
+# instead of being silently dropped. A dead-lettered batch is recorded as a
+# FAILED batch (lib/queue-consumer.ts detects a queue name ending "-dlq" and
+# posts ?dead=1 to /api/internal/campaign-batch) so the campaign finalizes to
+# 'failed' (admin can then Resend the unsent recipients) rather than sitting
+# in 'sending' forever. To enable:
+#   1. wrangler queues create coomander-campaign-send-dlq
+#   2. uncomment the dead_letter_queue line below AND the [[queues.consumers]]
+#      DLQ block, then redeploy.
+# (Left commented so a deploy without the DLQ created doesn't fail. Even
+# without it, the reconcile-stuck-campaigns cron backstop still rescues stuck
+# campaigns.)
+# dead_letter_queue = "coomander-campaign-send-dlq"
+
+# DLQ consumer — handleQueueBatch detects a queue ending in "-dlq" and records
+# each message as a failed batch (see lib/queue-consumer.ts). Uncomment with
+# the dead_letter_queue line above.
+# [[queues.consumers]]
+# queue = "coomander-campaign-send-dlq"
+# max_batch_size = 10
+# max_retries = 3
 
 # ── Video processor (Cloudflare Containers via separate Worker) ────────
 # Lives in node/workers/video-processor and owns the VideoProcessor
