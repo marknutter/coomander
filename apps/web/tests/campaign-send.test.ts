@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll } from "vitest";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { getDb } from "@/lib/db";
-import { emailCampaigns } from "@/lib/schema";
+import { emailCampaigns, campaignSendBatches } from "@/lib/schema";
 import {
   enqueueCampaignSend,
   processCampaignBatch,
@@ -25,6 +25,14 @@ import { createTestUser } from "./helpers/db";
 //     ONLY once batches_done >= batches_total, and ONLY when the campaign is
 //     still 'sending' — a campaign that is already 'sent' is left untouched
 //     (guards against double-finalization from racing/duplicate batches).
+//   - Correctness fix (adversarial review, sync #222): each batch payload
+//     carries a `batchIndex` (its position within the current send attempt).
+//     processCampaignBatch records (campaignId, batchIndex) in
+//     campaign_send_batches before incrementing batches_done, so a REDELIVERED
+//     batch (Cloudflare Queues is at-least-once) with the same batchIndex is a
+//     no-op for batches_done — it must NOT double-increment and must NOT
+//     prematurely finalize the campaign while a different batch is still
+//     outstanding.
 //
 // Written against the spec/public interface, not the implementation. The
 // producer test asserts on enqueueCampaignSend's OWN return value + the
@@ -211,6 +219,7 @@ describe("processCampaignBatch — batch bookkeeping (batches_done + finalize)",
       subject: "Hi",
       html: "<p>Hi</p>",
       recipients: ["one@example.com"],
+      batchIndex: 0,
     };
     await processCampaignBatch(payload);
 
@@ -232,6 +241,7 @@ describe("processCampaignBatch — batch bookkeeping (batches_done + finalize)",
       subject: "Hi",
       html: "<p>Hi</p>",
       recipients: ["two@example.com"],
+      batchIndex: 1,
     });
 
     const row = await readCampaign(id);
@@ -282,6 +292,7 @@ describe("processCampaignBatch — batch bookkeeping (batches_done + finalize)",
         subject: "Hi",
         html: "<p>Hi</p>",
         recipients: [`batch${i}@example.com`],
+        batchIndex: i,
       });
       const row = await readCampaign(id);
       expect(row.batches_done).toBe(i + 1);
@@ -289,6 +300,119 @@ describe("processCampaignBatch — batch bookkeeping (batches_done + finalize)",
 
     const final = await readCampaign(id);
     expect(final.status).toBe("sent");
+  });
+});
+
+// ── Per-batch idempotency — redelivery must NOT double-count batches_done ──
+//
+// Cloudflare Queues is at-least-once: the SAME batch message (same
+// campaignId + batchIndex) can be delivered and processed more than once.
+// Per-recipient sends are already deduped via alreadySent()/the
+// idx_email_events_sent_unique index, but batches_done bookkeeping needs its
+// own dedup — this is the bug the adversarial review flagged (Finding 2).
+
+describe("processCampaignBatch — batch redelivery is idempotent for batches_done", () => {
+  it("processing the SAME batch (same campaignId + batchIndex) twice increments batches_done only once", async () => {
+    const id = await insertDraftCampaign({
+      status: "sending",
+      batches_total: 2,
+      batches_done: 0,
+    });
+
+    const payload: CampaignBatchPayload = {
+      campaignId: id,
+      subject: "Hi",
+      html: "<p>Hi</p>",
+      recipients: ["redelivered@example.com"],
+      batchIndex: 0,
+    };
+
+    await processCampaignBatch(payload);
+    const afterFirst = await readCampaign(id);
+    expect(afterFirst.batches_done).toBe(1);
+    expect(afterFirst.status).toBe("sending"); // only 1 of 2 batches — not done yet
+
+    // Simulate a Cloudflare Queues at-least-once REDELIVERY of the identical
+    // batch message. The recipient is already sent (alreadySent() skips
+    // resending), but batches_done must NOT increment a second time, and the
+    // campaign must NOT prematurely finalize while batchIndex 1 never ran.
+    await processCampaignBatch(payload);
+    const afterRedelivery = await readCampaign(id);
+    expect(afterRedelivery.batches_done).toBe(1);
+    expect(afterRedelivery.status).toBe("sending");
+
+    // The other batch (batchIndex 1) genuinely completing should still bring
+    // the campaign to 'sent' — proves the dedup didn't silently break
+    // legitimate finalize.
+    await processCampaignBatch({
+      campaignId: id,
+      subject: "Hi",
+      html: "<p>Hi</p>",
+      recipients: ["other@example.com"],
+      batchIndex: 1,
+    });
+    const final = await readCampaign(id);
+    expect(final.batches_done).toBe(2);
+    expect(final.status).toBe("sent");
+  });
+
+  it("records exactly one campaign_send_batches row per distinct (campaignId, batchIndex), even after a redelivery", async () => {
+    const id = await insertDraftCampaign({
+      status: "sending",
+      batches_total: 1,
+      batches_done: 0,
+    });
+
+    const payload: CampaignBatchPayload = {
+      campaignId: id,
+      subject: "Hi",
+      html: "<p>Hi</p>",
+      recipients: ["dup@example.com"],
+      batchIndex: 0,
+    };
+
+    await processCampaignBatch(payload);
+    await processCampaignBatch(payload); // redelivery
+
+    const rows = await getDb()
+      .select()
+      .from(campaignSendBatches)
+      .where(
+        and(
+          eq(campaignSendBatches.campaign_id, id),
+          eq(campaignSendBatches.batch_id, "0"),
+        ),
+      )
+      .all();
+
+    expect(rows.length).toBe(1);
+  });
+
+  it("a DIFFERENT batchIndex for the same campaign is tracked independently and both count toward batches_done", async () => {
+    const id = await insertDraftCampaign({
+      status: "sending",
+      batches_total: 2,
+      batches_done: 0,
+    });
+
+    await processCampaignBatch({
+      campaignId: id,
+      subject: "Hi",
+      html: "<p>Hi</p>",
+      recipients: ["a@example.com"],
+      batchIndex: 0,
+    });
+    await processCampaignBatch({
+      campaignId: id,
+      subject: "Hi",
+      html: "<p>Hi</p>",
+      recipients: ["b@example.com"],
+      batchIndex: 1,
+    });
+
+    const row = await readCampaign(id);
+    expect(row.batches_done).toBe(2);
+    expect(row.status).toBe("sent");
   });
 });
 

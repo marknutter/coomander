@@ -8,6 +8,8 @@ import { emailCampaigns } from "@/lib/schema";
 import { queryFirst } from "@/lib/db-helpers";
 import { parseAudienceFilter, resolveAudience } from "@/lib/audiences";
 import { enqueueCampaignSend } from "@/lib/campaign-send";
+import { errorResponse } from "@/lib/errors";
+import { log } from "@/lib/logger";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -43,12 +45,32 @@ export async function POST(
   const filter = parseAudienceFilter(campaign.audience_filter);
   const recipients = await resolveAudience(filter);
 
-  await enqueueCampaignSend({
-    campaignId: id,
-    subject: campaign.subject,
-    html: campaign.html_content,
-    recipients,
-  });
+  try {
+    await enqueueCampaignSend({
+      campaignId: id,
+      subject: campaign.subject,
+      html: campaign.html_content,
+      recipients,
+    });
+  } catch (err) {
+    // enqueueCampaignSend flips status to 'sending' immediately, then loops
+    // enqueueing batches — if any enqueue throws partway, the campaign would
+    // otherwise be stuck at 'sending' forever (the UI blocks retry with "Only
+    // draft campaigns can be sent"). Revert to 'failed' so an admin can resend
+    // (resendCampaign only emails recipients who don't already have a `sent`
+    // event, so nothing double-sends). Mirrors the pre-batching send route's
+    // catch block.
+    log.error("[campaigns] send failed to enqueue", {
+      campaignId: id,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    await db
+      .update(emailCampaigns)
+      .set({ status: "failed", updated_at: new Date().toISOString() })
+      .where(eq(emailCampaigns.id, id))
+      .run();
+    return errorResponse(err);
+  }
 
   await logAdminAction(session.user.id, "campaign_sent", "campaign", id, {
     recipientCount: recipients.length,

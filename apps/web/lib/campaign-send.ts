@@ -35,7 +35,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { sendEmail, FROM } from "@/lib/email";
 import { applyCampaignTracking } from "@/lib/email-tracking";
 import { getDb } from "@/lib/db";
-import { emailCampaigns, emailEvents } from "@/lib/schema";
+import { emailCampaigns, emailEvents, campaignSendBatches } from "@/lib/schema";
 import { queryFirst, executeChanges } from "@/lib/db-helpers";
 import { enqueueJob, processJobs } from "@/lib/jobs";
 import { parseAudienceFilter, resolveAudience } from "@/lib/audiences";
@@ -50,11 +50,23 @@ export const CAMPAIGN_BATCH_SIZE = Math.max(
   parseInt(process.env.CAMPAIGN_BATCH_SIZE || "50", 10) || 50,
 );
 
-export interface CampaignBatchPayload {
+/** Producer-facing input: the whole resolved audience for a send, not yet
+ * chunked into batches. */
+export interface CampaignSendOpts {
   campaignId: string;
   subject: string;
   html: string;
   recipients: string[];
+}
+
+/** One queued batch's payload — what the CF Queue / job-queue transport
+ * actually carries and processCampaignBatch consumes. */
+export interface CampaignBatchPayload extends CampaignSendOpts {
+  /** This batch's position within the current send attempt (0-based).
+   * Combined with campaignId, forms the stable idempotency key
+   * (campaign_send_batches) that makes a redelivered batch a no-op for
+   * batches_done accounting — see advanceBatchProgress. */
+  batchIndex: number;
 }
 
 interface CampaignQueue {
@@ -134,7 +146,7 @@ async function sentEmailSet(campaignId: string): Promise<Set<string>> {
  *
  * Callers must have already resolved the audience to `recipients`.
  */
-export async function enqueueCampaignSend(opts: CampaignBatchPayload): Promise<{
+export async function enqueueCampaignSend(opts: CampaignSendOpts): Promise<{
   batches: number;
   recipients: number;
 }> {
@@ -158,6 +170,11 @@ export async function enqueueCampaignSend(opts: CampaignBatchPayload): Promise<{
     .where(eq(emailCampaigns.id, campaignId))
     .run();
 
+  // A fresh send restarts batch numbering from 0 — clear any idempotency
+  // rows left over from a prior attempt so they can't collide with (and
+  // silently no-op) this attempt's batch ids.
+  await resetBatchTracking(campaignId);
+
   if (recipients.length === 0) {
     // Empty audience — nothing to enqueue; finalize immediately.
     await db
@@ -170,6 +187,18 @@ export async function enqueueCampaignSend(opts: CampaignBatchPayload): Promise<{
   }
 
   return enqueueBatches(campaignId, subject, html, recipients);
+}
+
+/** Delete any campaign_send_batches idempotency rows for this campaign — call
+ * at the start of every fresh send/resend, alongside resetting batches_done,
+ * so a new attempt's batch ids (positional, starting at 0) can't collide with
+ * a prior attempt's already-recorded ids. */
+async function resetBatchTracking(campaignId: string): Promise<void> {
+  const db = getDb();
+  await db
+    .delete(campaignSendBatches)
+    .where(eq(campaignSendBatches.campaign_id, campaignId))
+    .run();
 }
 
 /**
@@ -186,8 +215,14 @@ async function enqueueBatches(
 ): Promise<{ batches: number; recipients: number }> {
   const batches = chunk(recipients, CAMPAIGN_BATCH_SIZE);
   const queue = getCampaignQueue();
-  for (const batch of batches) {
-    const payload: CampaignBatchPayload = { campaignId, subject, html, recipients: batch };
+  for (let i = 0; i < batches.length; i++) {
+    const payload: CampaignBatchPayload = {
+      campaignId,
+      subject,
+      html,
+      recipients: batches[i],
+      batchIndex: i,
+    };
     if (queue) {
       await queue.send(payload);
     } else {
@@ -255,6 +290,10 @@ export async function resendCampaign(campaignId: string): Promise<{
     .where(eq(emailCampaigns.id, campaignId))
     .run();
 
+  // Same reason as enqueueCampaignSend: a resend restarts batch numbering
+  // from 0, so clear the prior attempt's idempotency rows first.
+  await resetBatchTracking(campaignId);
+
   if (unsent.length === 0) {
     // Everyone already got it — finalize straight to sent.
     await db
@@ -296,8 +335,8 @@ async function drainCampaignBatches(): Promise<void> {
  * failing the batch. Advances batch progress on full completion.
  */
 export async function processCampaignBatch(payload: CampaignBatchPayload): Promise<void> {
-  const { campaignId, subject, html, recipients } = payload;
-  if (!campaignId || !Array.isArray(recipients)) {
+  const { campaignId, subject, html, recipients, batchIndex } = payload;
+  if (!campaignId || !Array.isArray(recipients) || typeof batchIndex !== "number") {
     throw new Error("[campaign-send] invalid batch payload");
   }
   const db = getDb();
@@ -380,7 +419,7 @@ export async function processCampaignBatch(payload: CampaignBatchPayload): Promi
     }
   }
 
-  await advanceBatchProgress(campaignId);
+  await advanceBatchProgress(campaignId, batchIndex);
 }
 
 /** Record a permanent per-recipient send failure as a `failed` event (deduped
@@ -434,15 +473,43 @@ export async function recordFailedBatch(campaignId: string, count = 1): Promise<
 }
 
 /**
- * Atomically record one completed batch, then re-evaluate finalize.
+ * Record one completed batch, then re-evaluate finalize. IDEMPOTENT per
+ * (campaignId, batchIndex): a Cloudflare Queues at-least-once REDELIVERY of a
+ * batch that already ran to completion (processCampaignBatch's per-recipient
+ * work is itself idempotent via alreadySent()) would otherwise increment
+ * batches_done a second time for work that was already counted — pushing
+ * batches_done toward batches_total and potentially finalizing the campaign
+ * as 'sent' while a DIFFERENT, still-outstanding batch never ran.
+ *
+ * Guarded by inserting (campaignId, batchIndex) into campaign_send_batches
+ * via INSERT ... ON CONFLICT DO NOTHING (unique on campaign_id+batch_id):
+ * batches_done is only incremented when that insert actually added a row,
+ * i.e. the first time this batch is recorded for the current send attempt.
  */
-async function advanceBatchProgress(campaignId: string): Promise<void> {
+async function advanceBatchProgress(campaignId: string, batchIndex: number): Promise<void> {
   const db = getDb();
-  await db
-    .update(emailCampaigns)
-    .set({ batches_done: sql`${emailCampaigns.batches_done} + 1`, updated_at: new Date().toISOString() })
-    .where(eq(emailCampaigns.id, campaignId))
-    .run();
+  const batchId = String(batchIndex);
+
+  const inserted = await executeChanges(
+    db
+      .insert(campaignSendBatches)
+      .values({ campaign_id: campaignId, batch_id: batchId })
+      .onConflictDoNothing(),
+  );
+
+  if (inserted > 0) {
+    await db
+      .update(emailCampaigns)
+      .set({ batches_done: sql`${emailCampaigns.batches_done} + 1`, updated_at: new Date().toISOString() })
+      .where(eq(emailCampaigns.id, campaignId))
+      .run();
+  } else {
+    log.info("[campaign-send] duplicate batch delivery ignored (idempotent)", {
+      campaignId,
+      batchIndex,
+    });
+  }
+
   await finalizeIfComplete(campaignId);
 }
 

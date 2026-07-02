@@ -303,6 +303,22 @@ export const emailCampaigns = sqliteTable("email_campaigns", {
   index("idx_campaigns_created_at").on(table.created_at),
 ]);
 
+// Per-batch idempotency for the send engine (migration 027, sync #222 fix):
+// advanceBatchProgress records a row here (campaign_id, batch_id) before
+// incrementing email_campaigns.batches_done, so a Cloudflare Queues
+// at-least-once REDELIVERY of an already-processed batch can't double-count
+// batches_done (and prematurely finalize the campaign as 'sent'). Rows are
+// cleared per-campaign at the start of every fresh send/resend so batch ids
+// (positional within that send attempt) never collide across attempts.
+export const campaignSendBatches = sqliteTable("campaign_send_batches", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  campaign_id: text("campaign_id").notNull(),
+  batch_id: text("batch_id").notNull(),
+  created_at: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  uniqueIndex("idx_csb_campaign_batch_unique").on(table.campaign_id, table.batch_id),
+]);
+
 export const _migrations = sqliteTable("_migrations", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   name: text("name").notNull().unique(),

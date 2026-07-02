@@ -304,6 +304,17 @@ export const emailCampaigns = pgTable("email_campaigns", {
   index("idx_campaigns_created_at").on(table.created_at),
 ]);
 
+// PG twin of the campaignSendBatches table in schema.sqlite.ts (migration
+// 010, sync #222 fix). See that file for the full rationale.
+export const campaignSendBatches = pgTable("campaign_send_batches", {
+  id: serial("id").primaryKey(),
+  campaign_id: text("campaign_id").notNull(),
+  batch_id: text("batch_id").notNull(),
+  created_at: text("created_at").default(sql`now()::text`),
+}, (table) => [
+  uniqueIndex("idx_csb_campaign_batch_unique").on(table.campaign_id, table.batch_id),
+]);
+
 export const _migrations = pgTable("_migrations", {
   id: serial("id").primaryKey(),
   name: text("name").notNull().unique(),
