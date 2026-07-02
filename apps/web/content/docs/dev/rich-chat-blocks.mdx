@@ -112,6 +112,45 @@ See the `generate_image` tool (`apps/agents/src/tools.ts`) and
 `[IMAGE:{"key":…,"alt":…}]` — R2-backed, auth-scoped storage keys, per-user/day
 quota enforced in `POST /api/images`.
 
+## Chat transcript rendering (shadcn components)
+
+The chat page (`apps/web/app/app/chat/page.tsx`) renders the transcript
+through shadcn-derived chat components under `apps/web/components/ui/`:
+`message-scroller`, `bubble`, `message`, `marker`. These are adapted from
+shadcn's June 2026 chat components (Radix variant) and restyled with
+Coomander's own Tailwind + semantic tokens — upstream's `cn-*` CSS design
+layer ships **empty** in the published `shadcn` package, so the components use
+`bg-card`/`text-muted-foreground`/the existing bubble colors instead. Component
+names, structure, and `data-*` attributes match upstream for sync legibility;
+only the class lists differ. `radix-ui` `Slot` imports are `@radix-ui/react-slot`
+(already a direct dep); the shadcn `Button`/`IconPlaceholder` references are
+replaced with native buttons / lucide icons (Coomander's `Button` has a
+different variant/size API).
+
+**`MessageScroller`** (the headless `@shadcn/react` engine, new pinned dep
+`@shadcn/react@0.1.0`, zero runtime deps) replaces the old
+`scrollIntoView`-on-every-token loop: it follows the live edge only when the
+reader is already at the bottom (scrolling up mid-stream no longer yanks you
+back down), opens the thread at its latest turn
+(`defaultScrollPosition="end"`), and shows a scroll-to-bottom button.
+Wiring: `Provider(autoScroll, defaultScrollPosition="end")` → `Root` →
+`Viewport(preserveScrollOnPrepend)` → `Content` → one `Item` per row
+(`messageId`, `scrollAnchor` on user turns) → a floating
+`Button direction="end"`. Transient rows (the streaming bubble, the "thinking"
+spinner, the live voice transcript) are `Item`s **without** `messageId` so the
+primitive doesn't register them as addressable.
+
+**`Marker`** renders the connecting/reconnecting status row, paired with the
+`shimmer` text-fill animation utility in `globals.css` (gated behind
+`prefers-reduced-motion`).
+
+**Coomander has no attachments**, so the shadcn `Attachment` component is
+intentionally NOT vendored — Coomander's chat is text/voice/rich-block only.
+
+The WebSocket transport and chat lifecycle (stall/reconnect handling,
+optimistic-bubble rollback, `?q=` deep-link seeding) are unchanged — this is a
+presentation-only change to how the transcript renders.
+
 ## Adding another block type
 
 If adding a new block type beyond `CHART`/`IMAGE`, extend

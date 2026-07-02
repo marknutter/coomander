@@ -12,19 +12,39 @@
  * when ops isn't on yet. The thread is still LOADED via `GET /api/coomander/chat`.
  *
  * One assistant, not two: this replaces the old `/app/chat` template chatbot.
+ *
+ * Rendering (#222 follow-up): the transcript renders through shadcn-derived
+ * chat components (MessageScroller/Message/Bubble/Marker, adapted from
+ * shadcn's June 2026 chat components) instead of hand-rolled markup + manual
+ * `scrollIntoView`-on-every-token. MessageScroller follows the live edge only
+ * when the reader is already at the bottom (scrolling up mid-stream no longer
+ * yanks you back down), opens the thread at its latest turn, and shows a
+ * scroll-to-bottom button. Coomander has no attachments, so the Attachment
+ * component is intentionally omitted here (see content/docs/dev/rich-chat-blocks.mdx).
  */
 
 import { useState, useEffect, useRef, useCallback, useMemo, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import {
-  Bot, Send, Mic, MicOff, Loader2, Sparkles, CheckCircle2,
+  Bot, Send, Mic, MicOff, Loader2, Sparkles, CheckCircle2, User,
 } from "lucide-react";
+import { stripAllTags } from "@coomander/core";
 import { ChatMessageContent } from "@/components/chat-message";
 import { useVoice } from "@/lib/use-voice";
-import { stripTags } from "@/lib/chat-tags";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
+import {
+  MessageScrollerProvider,
+  MessageScroller,
+  MessageScrollerViewport,
+  MessageScrollerContent,
+  MessageScrollerItem,
+  MessageScrollerButton,
+} from "@/components/ui/message-scroller";
+import { Bubble, BubbleContent } from "@/components/ui/bubble";
+import { Message, MessageAvatar, MessageContent } from "@/components/ui/message";
+import { Marker, MarkerIcon, MarkerContent } from "@/components/ui/marker";
 import { toast } from "@/lib/use-toast";
 import { authClient } from "@/lib/auth-client";
 import { useRealtime, type RealtimeEvent } from "@/lib/use-realtime";
@@ -60,6 +80,24 @@ const SUGGESTIONS = [
   "Posted the gym reel",
 ];
 
+/** Avatar for a transcript row — the Coomander mark vs. the creator. */
+function RowAvatar({ role }: { role: "user" | "assistant" }) {
+  if (role === "user") {
+    return (
+      <MessageAvatar>
+        <User className="w-4 h-4" />
+        <span className="sr-only">You</span>
+      </MessageAvatar>
+    );
+  }
+  return (
+    <MessageAvatar className="bg-primary/10 text-primary">
+      <Bot className="w-4 h-4" />
+      <span className="sr-only">Coomander</span>
+    </MessageAvatar>
+  );
+}
+
 function CoomanderChat() {
   const searchParams = useSearchParams();
   const [loading, setLoading] = useState(true);
@@ -74,7 +112,6 @@ function CoomanderChat() {
   // mount, mirroring components/notification-bell.tsx.
   const [userId, setUserId] = useState<string | null>(null);
 
-  const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const sendingRef = useRef(false);
   // Mirror audioEnabled + speak into refs so the memoized WS callbacks read the
@@ -103,10 +140,6 @@ function CoomanderChat() {
   // Whether the socket has ever opened — picks "Connecting…" vs "Reconnecting…".
   const hasConnectedRef = useRef(false);
 
-  const scrollToBottom = useCallback(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, []);
-
   // Hydrate the unified thread (oldest-first) + ops-enabled state.
   const loadThread = useCallback(async () => {
     const res = await fetch("/api/coomander/chat");
@@ -127,9 +160,8 @@ function CoomanderChat() {
       })
       .finally(() => {
         setLoading(false);
-        setTimeout(scrollToBottom, 100);
       });
-  }, [loadThread, scrollToBottom]);
+  }, [loadThread]);
 
   // Fetch the session user id so we can subscribe to this user's realtime
   // channel below (agent-initiated proactive/scheduled messages, #222).
@@ -195,7 +227,11 @@ function CoomanderChat() {
         sendingRef.current = false;
         await loadThread().catch(() => {});
         setStreamText(null);
-        const clean = stripTags(fullText);
+        // TTS must never read a raw [CHART:{…}]/[IMAGE:{…}] marker's JSON
+        // aloud — stripAllTags (unlike the block-preserving stripSystemTags
+        // used for display) strips block markers too, since voice has no
+        // block renderer.
+        const clean = stripAllTags(fullText);
         if (audioEnabledRef.current && clean) speakRef.current?.(clean).catch(() => {});
         wsResolveRef.current?.();
         wsResolveRef.current = null;
@@ -260,9 +296,6 @@ function CoomanderChat() {
     }, POLL_INTERVAL_MS);
     return () => clearInterval(t);
   }, [enabled]);
-
-  // Auto-scroll on new messages (and as WS tokens stream in).
-  useEffect(() => { scrollToBottom(); }, [messages, sending, streamText, scrollToBottom]);
 
   // Auto-resize the textarea.
   useEffect(() => {
@@ -452,82 +485,128 @@ function CoomanderChat() {
 
   return (
     <div className="flex flex-col h-[calc(100dvh-3.5rem)]">
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-6">
-        <div className="max-w-2xl mx-auto space-y-4">
-          {messages.length === 0 && !sending && (
-            <div className="text-center py-16">
-              <Bot className="w-10 h-10 text-primary/70 mx-auto mb-3" />
-              <p className="text-gray-700 dark:text-gray-200 font-medium">
-                Coomander is ready.
-              </p>
-              <p className="text-gray-400 dark:text-gray-500 text-xs mt-1">
-                Ask what to work on, or tell it what you shipped.
-              </p>
-              <div className="flex flex-wrap justify-center gap-2 mt-5">
-                {SUGGESTIONS.map((s) => (
-                  <button
-                    key={s}
-                    onClick={() => void handleSend(s)}
-                    className="px-3 py-1.5 rounded-full border border-gray-200 dark:border-gray-700 text-xs text-gray-600 dark:text-gray-300 hover:border-primary hover:text-primary transition-colors"
-                  >
-                    {s}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {messages.map((msg) => (
-            <div key={msg.id} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-              <div
-                className={`max-w-[80%] rounded-2xl px-4 py-2.5 ${
-                  msg.role === "user"
-                    ? "bg-primary text-white"
-                    : "bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100"
-                }`}
-              >
-                <ChatMessageContent content={msg.content} role={msg.role} />
-                {msg.acted && (
-                  <div className="flex items-center gap-1 mt-1.5 text-xs text-emerald-600 dark:text-emerald-400">
-                    <CheckCircle2 className="w-3 h-3" />
-                    <span>Logged to Cadence</span>
+      {/* Messages — scroll/anchoring owned by <MessageScroller> (#222 follow-up).
+          autoScroll follows streamed replies only when the reader is already at
+          the live edge; preserveScrollOnPrepend keeps position if older history
+          is prepended; defaultScrollPosition="end" opens the thread at its
+          latest turn. */}
+      <div className="flex-1 min-h-0">
+        <MessageScrollerProvider autoScroll defaultScrollPosition="end">
+          <MessageScroller>
+            <MessageScrollerViewport preserveScrollOnPrepend>
+              <MessageScrollerContent className="px-4 py-6">
+                {messages.length === 0 && !sending && (
+                  <div className="text-center py-16">
+                    <Bot className="w-10 h-10 text-primary/70 mx-auto mb-3" />
+                    <p className="text-gray-700 dark:text-gray-200 font-medium">
+                      Coomander is ready.
+                    </p>
+                    <p className="text-gray-400 dark:text-gray-500 text-xs mt-1">
+                      Ask what to work on, or tell it what you shipped.
+                    </p>
+                    <div className="flex flex-wrap justify-center gap-2 mt-5">
+                      {SUGGESTIONS.map((s) => (
+                        <button
+                          key={s}
+                          onClick={() => void handleSend(s)}
+                          className="px-3 py-1.5 rounded-full border border-gray-200 dark:border-gray-700 text-xs text-gray-600 dark:text-gray-300 hover:border-primary hover:text-primary transition-colors"
+                        >
+                          {s}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 )}
-              </div>
-            </div>
-          ))}
 
-          {/* Live streaming assistant bubble (WebSocket path, #192). */}
-          {streamText !== null && streamText.length > 0 && (
-            <div className="flex justify-start">
-              <div className="max-w-[80%] rounded-2xl px-4 py-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100">
-                <ChatMessageContent content={streamText} role="assistant" />
-              </div>
-            </div>
-          )}
+                {messages.map((msg, i) => {
+                  const isUser = msg.role === "user";
+                  const sameAsPrev = messages[i - 1]?.role === msg.role;
+                  const sameAsNext = messages[i + 1]?.role === msg.role;
+                  return (
+                    <MessageScrollerItem
+                      key={msg.id}
+                      messageId={msg.id}
+                      scrollAnchor={isUser && !sameAsPrev}
+                      className={`mx-auto w-full max-w-2xl ${sameAsPrev ? "pt-1" : "pt-4 first:pt-0"}`}
+                    >
+                      <Message align={isUser ? "end" : "start"}>
+                        {sameAsNext ? (
+                          <div className="w-8 shrink-0" aria-hidden="true" />
+                        ) : (
+                          <RowAvatar role={msg.role} />
+                        )}
+                        <MessageContent>
+                          <Bubble variant={isUser ? "primary" : "default"} align={isUser ? "end" : "start"}>
+                            <BubbleContent>
+                              <ChatMessageContent content={msg.content} role={msg.role} />
+                              {msg.acted && (
+                                <div className="flex items-center gap-1 mt-1.5 text-xs text-emerald-600 dark:text-emerald-400">
+                                  <CheckCircle2 className="w-3 h-3" />
+                                  <span>Logged to Cadence</span>
+                                </div>
+                              )}
+                            </BubbleContent>
+                          </Bubble>
+                        </MessageContent>
+                      </Message>
+                    </MessageScrollerItem>
+                  );
+                })}
 
-          {/* Thinking indicator — suppressed once tokens stream over the WS. */}
-          {sending && !streamText && (
-            <div className="flex justify-start">
-              <div className="rounded-2xl px-4 py-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
-                <Loader2 className="w-4 h-4 animate-spin text-gray-400" />
-              </div>
-            </div>
-          )}
+                {/* Live streaming assistant bubble (WebSocket path, #192). Transient
+                    (no messageId) — not addressable by the scroller. */}
+                {streamText !== null && streamText.length > 0 && (
+                  <MessageScrollerItem className="mx-auto w-full max-w-2xl pt-4">
+                    <Message align="start">
+                      <RowAvatar role="assistant" />
+                      <MessageContent>
+                        <Bubble variant="default" align="start">
+                          <BubbleContent>
+                            <ChatMessageContent content={streamText} role="assistant" />
+                          </BubbleContent>
+                        </Bubble>
+                      </MessageContent>
+                    </Message>
+                  </MessageScrollerItem>
+                )}
 
-          {/* Live voice transcript */}
-          {voiceState === "listening" && currentTranscript && (
-            <div className="flex justify-end">
-              <div className="max-w-[80%] rounded-2xl px-4 py-2.5 border-2 border-dashed border-primary text-accent-foreground text-sm">
-                {currentTranscript}
-                <span className="inline-block w-0.5 h-3.5 bg-primary animate-pulse ml-0.5" />
-              </div>
-            </div>
-          )}
+                {/* Thinking indicator — suppressed once tokens stream over the WS. */}
+                {sending && !streamText && (
+                  <MessageScrollerItem className="mx-auto w-full max-w-2xl pt-4">
+                    <Message align="start">
+                      <RowAvatar role="assistant" />
+                      <MessageContent>
+                        <Bubble variant="default" align="start">
+                          <BubbleContent>
+                            <Loader2 className="w-4 h-4 animate-spin text-gray-400" />
+                          </BubbleContent>
+                        </Bubble>
+                      </MessageContent>
+                    </Message>
+                  </MessageScrollerItem>
+                )}
 
-          <div ref={messagesEndRef} />
-        </div>
+                {/* Live voice transcript */}
+                {voiceState === "listening" && currentTranscript && (
+                  <MessageScrollerItem className="mx-auto w-full max-w-2xl pt-4">
+                    <Message align="end">
+                      <RowAvatar role="user" />
+                      <MessageContent>
+                        <Bubble variant="outline" align="end">
+                          <BubbleContent>
+                            {currentTranscript}
+                            <span className="inline-block w-0.5 h-3.5 bg-primary animate-pulse ml-0.5 align-middle" />
+                          </BubbleContent>
+                        </Bubble>
+                      </MessageContent>
+                    </Message>
+                  </MessageScrollerItem>
+                )}
+              </MessageScrollerContent>
+            </MessageScrollerViewport>
+            <MessageScrollerButton direction="end" />
+          </MessageScroller>
+        </MessageScrollerProvider>
       </div>
 
       {/* Hidden audio element for TTS */}
@@ -542,12 +621,14 @@ function CoomanderChat() {
 
       {/* Composer */}
       <div className="border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-4 py-3">
-        {/* Persistent connecting/reconnecting indicator */}
+        {/* Persistent connecting/reconnecting indicator — Marker + shimmer. */}
         {!socketReady && (
-          <div className="max-w-2xl mx-auto mb-2 flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400" role="status">
-            <Loader2 className="w-3 h-3 animate-spin" />
-            {hasConnectedRef.current ? "Reconnecting to Coomander…" : "Connecting to Coomander…"}
-          </div>
+          <Marker className="mx-auto max-w-2xl mb-2" role="status">
+            <MarkerIcon><Loader2 className="w-3 h-3 animate-spin" /></MarkerIcon>
+            <MarkerContent className="shimmer">
+              {hasConnectedRef.current ? "Reconnecting to Coomander…" : "Connecting to Coomander…"}
+            </MarkerContent>
+          </Marker>
         )}
         <form
           onSubmit={(e) => { e.preventDefault(); if (socketReady) void handleSend(); }}

@@ -265,3 +265,33 @@ body {
 .animate-in.slide-in-from-bottom {
   animation: slide-in-from-bottom 0.3s ease-out;
 }
+
+/* Live-status shimmer — used by chat Marker for connecting/reconnecting and
+ * streaming states (replaces the old blinking-cursor cue). A moving gradient
+ * is clipped to the text fill. */
+@keyframes shimmer {
+  to {
+    background-position: -200% center;
+  }
+}
+
+.shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--muted-foreground) 0%,
+    var(--foreground) 50%,
+    var(--muted-foreground) 100%
+  );
+  background-size: 200% auto;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+}
+
+/* The gradient text is readable when static; only animate it when the user
+ * hasn't asked for reduced motion. */
+@media (prefers-reduced-motion: no-preference) {
+  .shimmer {
+    animation: shimmer 1.6s linear infinite;
+  }
+}
