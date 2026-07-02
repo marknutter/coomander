@@ -5,7 +5,7 @@
  * Cron scheduling is only started when ENABLE_CRON=true.
  */
 
-import { eq, lt, lte, and, isNotNull } from "drizzle-orm";
+import { eq, lt, lte, and, isNotNull, sql } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import { user, session as sessionTable, emailCampaigns } from "@/lib/schema";
 import { log } from "@/lib/logger";
@@ -145,9 +145,53 @@ export async function dispatchScheduledCampaigns(): Promise<void> {
   log.info("Dispatched scheduled campaigns", { due: due.length, dispatched });
 }
 
+/**
+ * Reconcile stuck campaigns (hardening follow-up, sync #222). A campaign
+ * whose batch failed to complete (retry exhaustion / a dropped queue message
+ * with no dead-letter consumer configured) can sit in status='sending'
+ * forever, since finalize only fires when all batches are accounted for.
+ * This backstop marks such campaigns 'failed': status='sending' with no
+ * progress update for STUCK_CAMPAIGN_MINUTES and batches still outstanding. A
+ * genuinely-progressing send refreshes updated_at on every completed batch,
+ * so it never trips. Atomic + idempotent (guarded on status='sending').
+ */
+const STUCK_CAMPAIGN_MINUTES = Math.max(
+  1,
+  parseInt(process.env.STUCK_CAMPAIGN_MINUTES || "60", 10) || 60,
+);
+
+export async function reconcileStuckCampaigns(): Promise<void> {
+  const db = getDb();
+  const now = new Date().toISOString();
+  const cutoff = new Date(Date.now() - STUCK_CAMPAIGN_MINUTES * 60_000).toISOString();
+
+  const stuckPredicate = and(
+    eq(emailCampaigns.status, "sending"),
+    lt(emailCampaigns.updated_at, cutoff),
+    sql`${emailCampaigns.batches_total} > 0`,
+    sql`${emailCampaigns.batches_done} + ${emailCampaigns.batches_failed} < ${emailCampaigns.batches_total}`,
+  );
+
+  const changed = await executeChanges(
+    db
+      .update(emailCampaigns)
+      .set({
+        status: "failed",
+        batches_failed: sql`${emailCampaigns.batches_total} - ${emailCampaigns.batches_done}`,
+        updated_at: now,
+      })
+      .where(stuckPredicate),
+  );
+
+  if (changed > 0) {
+    log.warn("Reconciled stuck campaigns to failed", { count: changed, thresholdMinutes: STUCK_CAMPAIGN_MINUTES });
+  }
+}
+
 // ─── Registration ────────────────────────────────────────────────────────────
 
 const ONE_MINUTE = 60 * 1000;
+const FIFTEEN_MINUTES = 15 * 60 * 1000;
 const ONE_HOUR = 60 * 60 * 1000;
 const TWENTY_FOUR_HOURS = 24 * ONE_HOUR;
 
@@ -174,6 +218,7 @@ export function registerBuiltinJobs(): void {
   registerJob("deliver-webhook", handleDeliverWebhook);
   registerJob("send-campaign-batch", handleCampaignBatch);
   registerJob("dispatch-scheduled-campaigns", dispatchScheduledCampaigns);
+  registerJob("reconcile-stuck-campaigns", reconcileStuckCampaigns);
   log.info("Built-in job handlers registered");
 }
 
@@ -205,6 +250,14 @@ export function startBuiltinCrons(): void {
   registerCron("dispatch-scheduled-campaigns", ONE_MINUTE, async () => {
     await enqueueJob("dispatch-scheduled-campaigns");
     await processJobs(50);
+  });
+
+  // Stuck-campaign backstop (hardening follow-up, sync #222). Prod runs it off
+  // the same 15-minute Workers Cron Trigger as dispatch-scheduled-campaigns
+  // (see custom-worker.ts + wrangler.toml [triggers]).
+  registerCron("reconcile-stuck-campaigns", FIFTEEN_MINUTES, async () => {
+    await enqueueJob("reconcile-stuck-campaigns");
+    await processJobs(10);
   });
 
   startCron();

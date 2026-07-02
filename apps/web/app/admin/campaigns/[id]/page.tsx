@@ -20,6 +20,7 @@ interface Campaign {
   sent_count: number;
   batches_total: number;
   batches_done: number;
+  batches_failed: number;
   scheduled_at: string | null;
   sent_at: string | null;
   created_at: string;
@@ -115,8 +116,13 @@ export default function CampaignDetailPage() {
     fetchCampaign();
   }, [fetchCampaign]);
 
+  // Fetch analytics once per status transition (not on every sent_count tick)
+  // so opens/clicks are visible while sending, after finalize, and on failure.
   useEffect(() => {
-    if (campaign && campaign.status === "sent") {
+    if (
+      campaign &&
+      (campaign.status === "sent" || campaign.status === "sending" || campaign.status === "failed")
+    ) {
       fetchAnalytics();
     }
   }, [campaign, fetchAnalytics]);
@@ -265,6 +271,24 @@ export default function CampaignDetailPage() {
       toast.success("Campaign sent!");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Send failed");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const handleResend = async () => {
+    if (!confirm("Resend this campaign to recipients who didn't receive it? Already-sent recipients are skipped.")) {
+      return;
+    }
+    setSending(true);
+    try {
+      const res = await fetch(`/api/admin/campaigns/${id}/resend`, { method: "POST" });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Resend failed");
+      setCampaign(json.data);
+      toast.success("Resending to unsent recipients");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Resend failed");
     } finally {
       setSending(false);
     }
@@ -479,6 +503,23 @@ export default function CampaignDetailPage() {
                 : ""}
               .
             </p>
+          )}
+
+          {/* Failed send — offer an idempotent resend to the recipients who didn't get it */}
+          {campaign.status === "failed" && (
+            <div className="rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 p-4 space-y-2">
+              <p className="text-sm text-red-700 dark:text-red-300">
+                Send did not complete: {campaign.sent_count} of {campaign.recipient_count} delivered
+                {campaign.batches_failed > 0 ? `, ${campaign.batches_failed} batch(es) failed` : ""}.
+              </p>
+              <button
+                onClick={handleResend}
+                disabled={sending}
+                className="px-3 py-2 text-sm font-medium bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white rounded-md transition-colors"
+              >
+                {sending ? "Resending…" : "Resend to unsent recipients"}
+              </button>
+            </div>
           )}
 
           {/* Analytics */}
