@@ -207,52 +207,6 @@ describe("parseServerFrame", () => {
     });
   });
 
-  describe("proactive frame", () => {
-    it("parses a proactive frame with message only and omits conversationId key", () => {
-      const result = parseServerFrame(
-        JSON.stringify({ type: "proactive", message: "ping" })
-      );
-      expect(result).toEqual({ type: "proactive", message: "ping" });
-      expect(result).not.toHaveProperty("conversationId");
-    });
-
-    it("includes conversationId when it is a string", () => {
-      const result = parseServerFrame(
-        JSON.stringify({
-          type: "proactive",
-          message: "ping",
-          conversationId: "c9",
-        })
-      );
-      expect(result).toEqual({
-        type: "proactive",
-        message: "ping",
-        conversationId: "c9",
-      });
-    });
-
-    it("omits conversationId key when it is non-string", () => {
-      const result = parseServerFrame(
-        JSON.stringify({
-          type: "proactive",
-          message: "ping",
-          conversationId: 5,
-        })
-      );
-      expect(result).toEqual({ type: "proactive", message: "ping" });
-      expect(result).not.toHaveProperty("conversationId");
-    });
-
-    it("returns null when message is missing", () => {
-      expect(parseServerFrame(JSON.stringify({ type: "proactive" }))).toBeNull();
-    });
-
-    it("returns null when message is non-string", () => {
-      expect(
-        parseServerFrame(JSON.stringify({ type: "proactive", message: 5 }))
-      ).toBeNull();
-    });
-  });
 });
 
 describe("encodeChatFrame", () => {
@@ -372,7 +326,6 @@ describe("stream reducer", () => {
         conversationId: null,
         done: false,
         error: null,
-        proactive: [],
       });
     });
   });
@@ -389,7 +342,6 @@ describe("stream reducer", () => {
         conversationId: "c1",
         done: false,
         error: null,
-        proactive: [],
       });
     });
 
@@ -439,7 +391,6 @@ describe("stream reducer", () => {
         conversationId: "c2",
         done: true,
         error: null,
-        proactive: [],
       });
     });
 
@@ -457,18 +408,16 @@ describe("stream reducer", () => {
   });
 
   describe("reduce — error", () => {
-    it("clears streamingText, sets error, and preserves finalText and proactive", () => {
+    it("clears streamingText, sets error, and preserves finalText", () => {
       const state = {
         ...initialStreamState,
         streamingText: "partial",
         finalText: "kept final",
-        proactive: [{ message: "p1" }],
       };
       const next = reduce(state, { type: "error", message: "boom" });
       expect(next.streamingText).toBeNull();
       expect(next.error).toBe("boom");
       expect(next.finalText).toBe("kept final");
-      expect(next.proactive).toEqual([{ message: "p1" }]);
     });
 
     it("returns a new object reference and does not mutate input", () => {
@@ -477,64 +426,6 @@ describe("stream reducer", () => {
       const next = reduce(state, { type: "error", message: "boom" });
       expect(next).not.toBe(state);
       expect(state).toEqual(before);
-    });
-  });
-
-  describe("reduce — proactive", () => {
-    it("appends a message-only entry without conversationId key", () => {
-      const next = reduce(initialStreamState, {
-        type: "proactive",
-        message: "ping",
-      });
-      expect(next.proactive).toEqual([{ message: "ping" }]);
-      expect(next.proactive[0]).not.toHaveProperty("conversationId");
-    });
-
-    it("appends an entry with conversationId when present on the frame", () => {
-      const next = reduce(initialStreamState, {
-        type: "proactive",
-        message: "ping",
-        conversationId: "c5",
-      });
-      expect(next.proactive).toEqual([
-        { message: "ping", conversationId: "c5" },
-      ]);
-    });
-
-    it("returns a new proactive array reference and does not mutate the input array", () => {
-      const arr = [{ message: "first" }];
-      const state = { ...initialStreamState, proactive: arr };
-      const next = reduce(state, { type: "proactive", message: "second" });
-      expect(next.proactive).not.toBe(arr);
-      expect(arr).toHaveLength(1);
-      expect(next.proactive).toHaveLength(2);
-      expect(next).not.toBe(state);
-    });
-
-    it("leaves all other fields unchanged", () => {
-      const state = {
-        ...initialStreamState,
-        streamingText: "s",
-        finalText: "f",
-        conversationId: "c",
-        done: true,
-        error: "e",
-      };
-      const next = reduce(state, { type: "proactive", message: "ping" });
-      expect(next.streamingText).toBe("s");
-      expect(next.finalText).toBe("f");
-      expect(next.conversationId).toBe("c");
-      expect(next.done).toBe(true);
-      expect(next.error).toBe("e");
-    });
-
-    it("accumulates two consecutive proactive frames in order", () => {
-      const s1 = reduce(initialStreamState, {
-        type: "proactive",
-        message: "one",
-      });
-      const s2 = reduce(s1, { type: "proactive", message: "two" });
-      expect(s2.proactive).toEqual([{ message: "one" }, { message: "two" }]);
     });
   });
 
@@ -557,15 +448,13 @@ describe("stream reducer", () => {
   });
 
   describe("resetTurn", () => {
-    it("clears turn fields and preserves conversationId and proactive contents", () => {
-      const proactive = [{ message: "p1" }, { message: "p2" }];
+    it("clears turn fields and preserves conversationId", () => {
       const state = {
         streamingText: "partial",
         finalText: "final",
         conversationId: "c7",
         done: true,
         error: "boom",
-        proactive,
       };
       const next = resetTurn(state);
       expect(next).toEqual({
@@ -574,9 +463,7 @@ describe("stream reducer", () => {
         conversationId: "c7",
         done: false,
         error: null,
-        proactive,
       });
-      expect(next.proactive).toEqual(proactive);
     });
 
     it("returns a new object reference and does not mutate input", () => {
@@ -586,7 +473,6 @@ describe("stream reducer", () => {
         conversationId: "c7",
         done: true,
         error: "boom",
-        proactive: [{ message: "p1" }],
       };
       const before = JSON.parse(JSON.stringify(state));
       const next = resetTurn(state);

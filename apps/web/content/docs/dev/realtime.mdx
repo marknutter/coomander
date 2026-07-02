@@ -114,10 +114,17 @@ each received event. Pass `null` as the channel to subscribe to nothing (e.g.
 while the user id is still loading) — the hook tears down cleanly on
 unmount / channel change.
 
-- **Mobile is not wired up yet.** Unlike the AppSeed template (which ships a
-  matching Expo `useRealtime` hook), Coomander's `apps/mobile` doesn't have one
-  yet — that's a separate, follow-up slice. Mobile proactive delivery falls
-  back to the Telegram channel until it lands.
+- **Mobile has a matching hook** at `apps/mobile/src/lib/use-realtime.ts` — same
+  public API (`useRealtime(channel, onEvent)`, same `RealtimeEvent` type). It
+  can't rely on the browser attaching the session cookie same-origin, so it
+  injects `Cookie: authClient.getCookie()` on the WS upgrade via React Native's
+  3-arg `new WebSocket(url, protocols, { headers })` (mirroring
+  `use-agent-socket.ts`). It also swaps the web hook's `visibilitychange`
+  listener for React Native's `AppState`: the socket closes on
+  background/inactive and reconnects immediately on `active`, since mobile OSes
+  freeze/kill background sockets. The mobile chat screen
+  (`apps/mobile/src/app/(app)/index.tsx`) subscribes to `user:<id>` and renders
+  `agent-message` events the same way the web chat page does.
 - **The client keeps the socket warm.** The hook sends a `{type:"ping"}`
   heartbeat every 25s. The DO only revalidates the session on inbound frames, so
   the heartbeat both keeps an authenticated socket alive and lets idle proxies
