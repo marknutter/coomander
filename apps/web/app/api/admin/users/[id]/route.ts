@@ -1,3 +1,6 @@
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
 import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { getEffectivePlan } from "@/lib/admin";
@@ -37,6 +40,7 @@ export async function GET(
         stripeSubscriptionId: user.stripeSubscriptionId,
         emailVerified: user.emailVerified,
         disabled: user.disabled,
+        banned: user.banned,
         override_plan: planOverrides.plan,
         override_reason: planOverrides.reason,
         override_expires_at: planOverrides.expires_at,
@@ -67,7 +71,9 @@ export async function GET(
       stripeCustomerId: row.stripeCustomerId,
       stripeSubscriptionId: row.stripeSubscriptionId,
       emailVerified: row.emailVerified === 1,
-      disabled: row.disabled === 1,
+      // `banned` (admin-plugin, enforced by Better Auth) is the source of truth.
+      // Treat a legacy `disabled=1` as disabled too for backward compat.
+      disabled: row.banned === 1 || row.disabled === 1,
       planOverride: row.override_plan
         ? {
             plan: row.override_plan,

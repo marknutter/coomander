@@ -10,6 +10,11 @@
     "theming",
     "---AI---",
     "ai-models",
+    "rich-chat-blocks",
+    "---Realtime---",
+    "realtime",
+    "---Email---",
+    "email-marketing",
     "---Deployment---",
     "cloudflare-workers-compat"
   ]

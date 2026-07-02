@@ -24,6 +24,7 @@
  * same way geology does.
  */
 import { default as handler } from "./.open-next/worker.js";
+import { handleQueueBatch } from "./lib/queue-consumer";
 
 // Tight-preset cron (UTC) -> slot. Mirror of scheduling.ts CRON_SLOT_MAP.
 const CRON_SLOT = {
@@ -38,10 +39,26 @@ const CRON_SLOT = {
 // both run and event.cron distinguishes them.
 const WEEKLY_REVIEW_CRON = "0 1 * * 1";
 
+// Campaign engine recurring jobs (#597, epic #595, sync #222): dispatching due
+// scheduled sends. Every 15 minutes, matching wrangler.toml [triggers].
+const CAMPAIGN_CRON = "*/15 * * * *";
+
 async function post(path, env, ctx, payload) {
   const req = new Request(`https://coomander.com${path}`, {
     method: "POST",
     headers: { "content-type": "application/json", "x-agent-secret": env.COOMANDER_RUN_SECRET ?? "" },
+    body: JSON.stringify(payload),
+  });
+  return handler.fetch(req, env, ctx);
+}
+
+// Internal routes protected by AGENTS_INTERNAL_SECRET (Coomander's existing
+// server-to-server shared-secret pattern — see lib/internal-auth.ts), NOT
+// COOMANDER_RUN_SECRET above and deliberately NOT AppSeed's CRON_SECRET.
+async function postInternal(path, env, ctx, payload) {
+  const req = new Request(`https://coomander.com${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-agents-internal-secret": env.AGENTS_INTERNAL_SECRET ?? "" },
     body: JSON.stringify(payload),
   });
   return handler.fetch(req, env, ctx);
@@ -56,9 +73,22 @@ const worker = {
       console.log(`[cron] coomander weekly-review cron="${event.cron}" -> ${res.status} ${await res.text().catch(() => "")}`);
       return;
     }
+    if (event.cron === CAMPAIGN_CRON) {
+      const res = await postInternal("/api/internal/campaign-cron", env, ctx, {});
+      console.log(`[cron] campaign-cron cron="${event.cron}" -> ${res.status} ${await res.text().catch(() => "")}`);
+      return;
+    }
     const slot = CRON_SLOT[event.cron] ?? "check";
     const res = await post("/api/coomander/run", env, ctx, { slot });
     console.log(`[cron] coomander cron="${event.cron}" slot="${slot}" -> ${res.status} ${await res.text().catch(() => "")}`);
+  },
+
+  // CAMPAIGN_QUEUE consumer (#454, epic #595, sync #222). Each message is
+  // replayed through the app's own fetch pipeline (POST
+  // /api/internal/campaign-batch) so the batch runs with a real request
+  // context + D1 binding. See lib/queue-consumer.ts.
+  queue(batch, env, ctx) {
+    return handleQueueBatch(batch, env, ctx, handler.fetch);
   },
 };
 

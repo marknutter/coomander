@@ -3,6 +3,10 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Alert } from "@/components/ui/alert";
+// Bundle EasyMDE's stylesheet from the installed dep rather than fetching it
+// from a CDN at runtime — the prod CSP `style-src` blocks cdn.jsdelivr.net,
+// which left the editor unstyled.
+import "easymde/dist/easymde.min.css";
 
 interface BlogPost {
   id?: number;
@@ -55,15 +59,6 @@ export function BlogEditor({ post }: BlogEditorProps) {
 
     (async () => {
       const EasyMDE = (await import("easymde")).default;
-
-      // Inject EasyMDE CSS if not already present
-      if (!document.getElementById("easymde-css")) {
-        const link = document.createElement("link");
-        link.id = "easymde-css";
-        link.rel = "stylesheet";
-        link.href = "https://cdn.jsdelivr.net/npm/easymde/dist/easymde.min.css";
-        document.head.appendChild(link);
-      }
 
       if (!textareaRef.current) return;
 

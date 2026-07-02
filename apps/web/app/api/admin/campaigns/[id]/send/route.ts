@@ -4,13 +4,23 @@ import { logAdminAction } from "@/lib/admin";
 import { requirePermission } from "@/lib/rbac";
 import { PERMISSIONS } from "@/lib/permissions";
 import { getDb } from "@/lib/db";
-import { emailCampaigns, newsletterSubscribers } from "@/lib/schema";
+import { emailCampaigns } from "@/lib/schema";
 import { queryFirst } from "@/lib/db-helpers";
-import { sendCampaignDirect } from "@/lib/broadcasts";
+import { parseAudienceFilter, resolveAudience } from "@/lib/audiences";
+import { enqueueCampaignSend } from "@/lib/campaign-send";
+import { errorResponse } from "@/lib/errors";
+import { log } from "@/lib/logger";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+/**
+ * Kick off a campaign send (#454, epic #595, sync #222). Resolves the
+ * campaign's audience_filter to a concrete recipient list, then hands off to
+ * the batched producer (lib/campaign-send.ts) which enqueues the send and
+ * returns immediately — the actual emails go out asynchronously via the
+ * CAMPAIGN_QUEUE consumer (Workers) or the job-queue drain (dev).
+ */
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -32,55 +42,43 @@ export async function POST(
     return NextResponse.json({ error: "Only draft campaigns can be sent" }, { status: 400 });
   }
 
-  // Update status to sending
-  await db.update(emailCampaigns)
-    .set({ status: "sending", updated_at: new Date().toISOString() })
-    .where(eq(emailCampaigns.id, id))
-    .run();
+  const filter = parseAudienceFilter(campaign.audience_filter);
+  const recipients = await resolveAudience(filter);
 
   try {
-    // Cloudflare Email Service has no audience/broadcast API, so campaigns are
-    // always sent directly to our active subscribers, one email per recipient.
-    const subscribers = await db
-      .select({ email: newsletterSubscribers.email })
-      .from(newsletterSubscribers)
-      .where(eq(newsletterSubscribers.status, "active"))
-      .all();
-
-    const emails = subscribers.map((s) => s.email);
-
-    await db.update(emailCampaigns)
-      .set({ recipient_count: emails.length, updated_at: new Date().toISOString() })
-      .where(eq(emailCampaigns.id, id))
-      .run();
-
-    const result = await sendCampaignDirect(id, campaign.subject, campaign.html_content, emails);
-
-    await db.update(emailCampaigns)
-      .set({
-        status: "sent",
-        sent_count: result.sent,
-        sent_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .where(eq(emailCampaigns.id, id))
-      .run();
-
-    await logAdminAction(session.user.id, "campaign_sent", "campaign", id);
-
-    const updated = await queryFirst(
-      db.select().from(emailCampaigns).where(eq(emailCampaigns.id, id))
-    );
-
-    return NextResponse.json({ data: updated });
+    await enqueueCampaignSend({
+      campaignId: id,
+      subject: campaign.subject,
+      html: campaign.html_content,
+      recipients,
+    });
   } catch (err) {
-    console.error("[campaigns] send failed:", err);
-
-    await db.update(emailCampaigns)
+    // enqueueCampaignSend flips status to 'sending' immediately, then loops
+    // enqueueing batches — if any enqueue throws partway, the campaign would
+    // otherwise be stuck at 'sending' forever (the UI blocks retry with "Only
+    // draft campaigns can be sent"). Revert to 'failed' so an admin can resend
+    // (resendCampaign only emails recipients who don't already have a `sent`
+    // event, so nothing double-sends). Mirrors the pre-batching send route's
+    // catch block.
+    log.error("[campaigns] send failed to enqueue", {
+      campaignId: id,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    await db
+      .update(emailCampaigns)
       .set({ status: "failed", updated_at: new Date().toISOString() })
       .where(eq(emailCampaigns.id, id))
       .run();
-
-    return NextResponse.json({ error: "Failed to send campaign" }, { status: 500 });
+    return errorResponse(err);
   }
+
+  await logAdminAction(session.user.id, "campaign_sent", "campaign", id, {
+    recipientCount: recipients.length,
+  });
+
+  const updated = await queryFirst(
+    db.select().from(emailCampaigns).where(eq(emailCampaigns.id, id))
+  );
+
+  return NextResponse.json({ data: updated });
 }

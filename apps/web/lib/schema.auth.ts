@@ -36,6 +36,10 @@ export const user = sqliteTable("user", {
   subscriptionStatus: text("subscriptionStatus").default("inactive"),
   isAdmin: integer("isAdmin", { mode: "boolean" }).notNull().default(false),
   disabled: integer("disabled", { mode: "boolean" }).notNull().default(false),
+  role: text("role").default("user"),
+  banned: integer("banned", { mode: "boolean" }).default(false),
+  banReason: text("banReason"),
+  banExpires: integer("banExpires", { mode: "timestamp" }),
 });
 
 export const session = sqliteTable("session", {

@@ -1,14 +1,14 @@
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
 import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { logAdminAction } from "@/lib/admin";
 import { requirePermission } from "@/lib/rbac";
 import { PERMISSIONS } from "@/lib/permissions";
 import { getDb } from "@/lib/db";
-import { getRawAdapter } from "@/lib/db-raw";
-import { isPg } from "@/lib/db-dialect";
+import { auth } from "@/lib/auth";
 import { user } from "@/lib/schema";
-import { sendPasswordResetEmail } from "@/lib/email";
-import { randomBytes } from "crypto";
 import { queryFirst } from "@/lib/db-helpers";
 
 const APP_URL = process.env.APP_URL || "https://YOUR_DOMAIN";
@@ -38,23 +38,25 @@ export async function POST(
   }
 
   try {
-    // Generate a reset token and store it in Better Auth's verification table
-    const token = randomBytes(32).toString("hex");
-    const expiresAt = new Date(Date.now() + 3600_000).toISOString(); // 1 hour
-
-    // Use raw adapter for verification table insert (Better Auth managed table)
-    const nowExpr = isPg() ? "extract(epoch from now())::integer" : "unixepoch()";
-    await getRawAdapter().run(
-      `INSERT INTO verification (id, identifier, value, "expiresAt", "createdAt", "updatedAt")
-       VALUES (?, ?, ?, ?, ${nowExpr}, ${nowExpr})`,
-      randomBytes(16).toString("hex"),
-      `reset-password:${row.email}`,
-      token,
-      expiresAt
-    );
-
-    const resetUrl = `${APP_URL}/reset-password?token=${encodeURIComponent(token)}`;
-    await sendPasswordResetEmail(row.email, resetUrl);
+    // Drive Better Auth's own password-reset flow rather than hand-rolling a
+    // verification row. The route previously inserted a row as
+    // identifier="reset-password:${email}" / value=token — but Better Auth's
+    // reset endpoint looks up identifier="reset-password:${token}" and reads
+    // value as the userId, the exact inverse — so the emailed link was always
+    // dead (silent failure: admin saw success, user got a broken link).
+    // requestPasswordReset() generates the token in Better Auth's own format,
+    // stores it correctly, and invokes the configured
+    // emailAndPassword.sendResetPassword callback (wired in lib/auth.ts) to
+    // deliver the email. The `redirectTo` origin must be a trusted origin
+    // (BETTER_AUTH_URL / APP_URL). Better Auth issues `/reset-password/:token`
+    // then redirects to `redirectTo?token=…`, which the existing
+    // /reset-password page reads.
+    await auth.api.requestPasswordReset({
+      body: {
+        email: row.email,
+        redirectTo: `${APP_URL}/reset-password`,
+      },
+    });
   } catch (err) {
     console.error("[admin] Failed to send password reset email:", err);
     return NextResponse.json({ error: "Failed to send reset email" }, { status: 500 });

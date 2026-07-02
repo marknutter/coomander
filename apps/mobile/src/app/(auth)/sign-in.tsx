@@ -6,7 +6,6 @@ import {
   Pressable,
   ActivityIndicator,
   KeyboardAvoidingView,
-  Platform,
   ScrollView,
   StyleSheet,
 } from "react-native";
@@ -206,7 +205,7 @@ export default function SignInScreen() {
       <Screen edges={["top", "bottom", "left", "right"]}>
         <KeyboardAvoidingView
           style={styles.fill}
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          behavior="padding"
         >
           <ScrollView
             contentContainerStyle={styles.scrollContent}
@@ -230,7 +229,7 @@ export default function SignInScreen() {
     <Screen edges={["top", "bottom", "left", "right"]}>
       <KeyboardAvoidingView
         style={styles.fill}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        behavior="padding"
       >
         <ScrollView
           contentContainerStyle={styles.scrollContent}

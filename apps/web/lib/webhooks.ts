@@ -13,6 +13,7 @@ import { webhooks, webhookDeliveries } from "@/lib/schema";
 import { log } from "@/lib/logger";
 import { enqueueJob } from "@/lib/jobs";
 import { queryFirst, executeChanges } from "@/lib/db-helpers";
+import { assertSafeWebhookUrl } from "@/lib/ssrf";
 
 // ─── Webhook CRUD ──────────────────────────────────────────────────────────
 
@@ -200,6 +201,28 @@ export async function deliverWebhook(jobPayload: Record<string, unknown>): Promi
     .set({ attempts: sql`${webhookDeliveries.attempts} + 1` })
     .where(eq(webhookDeliveries.id, deliveryId));
 
+  // SSRF guard: re-validate the target at delivery time (not just at create/
+  // update time) so a URL that became unsafe after creation — e.g. via DNS
+  // rebinding — still can't be reached. A blocked target is a PERMANENT failure
+  // (retrying won't make it safe), so we record a completed failed delivery and
+  // return WITHOUT throwing — deliverWebhook keeps its best-effort, non-throwing
+  // contract for this case rather than triggering a retry.
+  try {
+    await assertSafeWebhookUrl(webhook.url);
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    await db.update(webhookDeliveries)
+      .set({
+        success: 0,
+        lastError: errorMsg,
+        completedAt: sql`unixepoch()`,
+      })
+      .where(eq(webhookDeliveries.id, deliveryId));
+
+    log.warn("Webhook delivery blocked by SSRF guard", { deliveryId, webhookId, error: errorMsg });
+    return;
+  }
+
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 10000);
@@ -213,6 +236,7 @@ export async function deliverWebhook(jobPayload: Record<string, unknown>): Promi
         "X-Webhook-Id": delivery.id,
       },
       body,
+      redirect: "manual",
       signal: controller.signal,
     });
 

@@ -29,7 +29,14 @@ export const user = pgTable("user", {
   stripeSubscriptionId: text("stripeSubscriptionId"),
   subscriptionStatus: text("subscriptionStatus").default("inactive"),
   isAdmin: integer("isAdmin").notNull().default(0),
+  // Legacy, unenforced-on-its-own flag — superseded by the Better Auth admin
+  // plugin's banned/banExpires below. Kept for display/back-compat.
   disabled: integer("disabled").notNull().default(0),
+  // Better Auth admin plugin (ban semantics) — see lib/schema.sqlite.ts.
+  role: text("role").default("user"),
+  banned: integer("banned").default(0),
+  banReason: text("banReason"),
+  banExpires: integer("banExpires"),
   // Coomander (#151): Telegram destination + opt-in flag for the ops agent.
   telegramChatId: text("telegramChatId"),
   coomanderEnabled: integer("coomanderEnabled").notNull().default(0),
@@ -290,6 +297,9 @@ export const emailCampaigns = pgTable("email_campaigns", {
   audience_filter: text("audience_filter").default("{}"),
   recipient_count: integer("recipient_count").default(0),
   sent_count: integer("sent_count").default(0),
+  batches_total: integer("batches_total").default(0),
+  batches_done: integer("batches_done").default(0),
+  batches_failed: integer("batches_failed").default(0),
   scheduled_at: text("scheduled_at"),
   sent_at: text("sent_at"),
   resend_broadcast_id: text("resend_broadcast_id"),
@@ -299,6 +309,17 @@ export const emailCampaigns = pgTable("email_campaigns", {
 }, (table) => [
   index("idx_campaigns_status").on(table.status),
   index("idx_campaigns_created_at").on(table.created_at),
+]);
+
+// PG twin of the campaignSendBatches table in schema.sqlite.ts (migration
+// 010, sync #222 fix). See that file for the full rationale.
+export const campaignSendBatches = pgTable("campaign_send_batches", {
+  id: serial("id").primaryKey(),
+  campaign_id: text("campaign_id").notNull(),
+  batch_id: text("batch_id").notNull(),
+  created_at: text("created_at").default(sql`now()::text`),
+}, (table) => [
+  uniqueIndex("idx_csb_campaign_batch_unique").on(table.campaign_id, table.batch_id),
 ]);
 
 export const _migrations = pgTable("_migrations", {

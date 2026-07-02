@@ -1,0 +1,184 @@
+---
+title: Email Marketing (Campaigns)
+description: Audiences/tags, the batched queued send engine, scheduled sends, and failure-recovery hardening for admin email campaigns — synced from AppSeed's #595 epic (#222).
+---
+
+# Email Marketing (Campaigns)
+
+Coomander's admin can author HTML email campaigns and send them to
+subscribers targeted by an **audience** (all active subscribers, or a
+tag-based segment). Sends are **batched and queued** rather than blasted
+inline, can be **scheduled** for a future time, and the engine is **hardened**
+against partial/at-scale failures — a stuck send self-recovers, dropped
+recipients are visible, and a failed campaign can be resent to just the
+recipients who never got it.
+
+This ports AppSeed's "basic Mailchimp parity" epic (#595 upstream:
+audiences/tags #596, batched send #454, scheduled send #597) plus its
+hardening follow-up, onto Coomander (sync #222).
+
+> **Realtime progress is live.** The admin campaign detail page subscribes to
+> the per-campaign `campaign:<id>` realtime channel (admin-only — see the
+> Realtime dev wiki page, `content/docs/dev/realtime.mdx`) instead of polling.
+> `lib/campaign-realtime.ts`
+> publishes a `campaign-progress` event at every batch-boundary seam in
+> `lib/campaign-send.ts` (sending baseline, per completed batch, finalize,
+> empty audience, resend, dead-letter/reconciler) and a `campaign-opened` event
+> from the open-tracking pixel route. Best-effort and non-throwing throughout —
+> a broken realtime hop degrades to "the page shows the last-fetched state
+> until refreshed," never to a failed/dropped send. The D1 row on
+> `email_campaigns` stays the single source of truth.
+
+## Data model
+
+Two existing tables carry the new columns (added via `migrations/012` and
+`013`, then extended by `024`/`026`):
+
+- `newsletter_subscribers.tags` — a JSON string array. A "list" or "segment"
+  is just a set of tags; there's no separate lists table.
+- `email_campaigns` — `audience_filter` (JSON), `scheduled_at`,
+  `recipient_count`, `sent_count`, `batches_total`, `batches_done`,
+  `batches_failed`.
+- `email_events` — `event_type='sent'` and `event_type='failed'` rows, each
+  deduped per `(campaign_id, subscriber_email)` via partial unique indexes
+  (migrations `024` and `026`), so retries/redeliveries never double-count.
+
+## Audiences (`lib/audiences.ts`)
+
+```ts
+type AudienceFilter =
+  | { kind: "all" }
+  | { kind: "tags"; tags: string[]; match: "any" | "all" };
+```
+
+`parseAudienceFilter` / `serializeAudienceFilter` convert to/from the
+campaign's `audience_filter` column (default/malformed → `{kind:"all"}`, so a
+campaign with no explicit audience behaves like the historical "blast
+everyone active" path). `resolveAudience(filter)` always scopes to
+`status='active'` subscribers first, then narrows by tag in JS (tags are a
+JSON blob — matching can't be pushed into portable SQL across SQLite/D1/PG).
+`listTagsWithCounts()` powers the admin subscriber tag filter and the
+campaign `AudiencePicker` component.
+
+Admin UI: `components/admin/audience-picker.tsx` (all-vs-tags picker with
+any/all match, live recipient count via `POST
+/api/admin/campaigns/audience-count`) and `components/admin/tag-editor.tsx`
+(inline chip editor on each subscriber row, `PATCH /api/admin/subscribers`).
+
+## Batched queued send (`lib/campaign-send.ts`)
+
+`POST /api/admin/campaigns/[id]/send` no longer sends inline — it resolves
+the audience and calls `enqueueCampaignSend()`, which:
+
+1. Sets `status='sending'`, records `batches_total` / resets `batches_done` /
+   `batches_failed`, and chunks recipients into batches of
+   `CAMPAIGN_BATCH_SIZE` (default 50 — CF Email Service is
+   reputation-rate-limited, so batches stay modest).
+2. Enqueues each batch on whichever transport is available:
+   - **Prod (Workers):** the `CAMPAIGN_QUEUE` binding. `custom-worker.ts`'s
+     `queue()` handler → `lib/queue-consumer.ts` → `POST
+     /api/internal/campaign-batch` (replayed through the app's own fetch
+     pipeline so the batch runs with a real D1 request context).
+   - **Dev / non-Workers:** the existing SQLite/D1 job queue (`lib/jobs.ts`),
+     job type `send-campaign-batch`. The producer kicks a background drain so
+     an admin-triggered send completes in seconds without waiting for a cron
+     tick.
+3. The consumer (`processCampaignBatch`) sends one tracked email per
+   recipient (`applyCampaignTracking` + `sendEmail`), records a `sent`
+   `email_events` row (idempotent via `ON CONFLICT DO NOTHING` on the
+   migration-024 partial unique index — only a genuinely-inserted row
+   increments `sent_count`, so a redelivered batch can't over-count), and
+   advances `batches_done`.
+4. A rate-limit error (`isRateLimitError` — matches "429" / "rate limit" /
+   "quota" phrasings) makes the WHOLE batch throw so the transport retries it
+   with backoff; already-sent recipients are skipped on retry via
+   `alreadySent()`. A permanent per-recipient failure (bad address, etc.)
+   does NOT stall the batch — it's recorded as a `failed` event
+   (`recordFailedRecipient`) and the batch continues.
+5. `finalizeIfComplete` runs after every batch: once
+   `batches_done + batches_failed >= batches_total`, the campaign finalizes —
+   `sent` if `batches_failed=0`, else `failed`. This is a single atomic SQL
+   `CASE` UPDATE guarded on `status='sending'`, so concurrent batches racing
+   the threshold (or a redelivered dead-letter message) finalize exactly
+   once.
+
+## Scheduled send
+
+`POST /api/admin/campaigns/[id]/schedule` (body: `{ scheduled_at }`, ISO-8601,
+must be future) sets `status='scheduled'`; `POST
+/api/admin/campaigns/[id]/cancel` returns it to `draft`. Both are atomic
+guards (`status IN (...)` on the UPDATE) so they can't race the dispatcher.
+
+`dispatchScheduledCampaigns()` (`jobs/index.ts`) scans for
+`status='scheduled'` rows whose `scheduled_at <= now`, atomically claims each
+(`scheduled` → `sending`, so overlapping ticks can't double-dispatch),
+resolves the audience, and calls `enqueueCampaignSend`. It's registered as a
+job (dev cron: every minute — fast enough for a "schedule it 2 minutes out
+and watch it fire" QA loop) and reachable in prod via `POST
+/api/internal/campaign-cron`, which `custom-worker.ts`'s `scheduled()`
+handler hits on the `*/15 * * * *` Workers Cron Trigger (see
+`wrangler.toml` `[triggers]`).
+
+## Hardening: failed state, reconciler, resend, dead-letter
+
+- **Reconciler backstop** — `reconcileStuckCampaigns()` (also in
+  `jobs/index.ts`, same 15-minute cron) marks a campaign `failed` if it's
+  been `status='sending'` with no `updated_at` progress for
+  `STUCK_CAMPAIGN_MINUTES` (default 60) and batches remain outstanding. A
+  genuinely-progressing send refreshes `updated_at` on every completed batch,
+  so it never trips.
+- **Dead-letter queue (opt-in)** — `wrangler.toml` has a commented DLQ block
+  on the `CAMPAIGN_QUEUE` consumer. When enabled
+  (`wrangler queues create coomander-campaign-send-dlq`, then uncomment),
+  `lib/queue-consumer.ts` detects a batch arriving on a queue ending `-dlq`
+  and posts `?dead=1` to `/api/internal/campaign-batch`, which calls
+  `recordFailedBatch()` instead of retrying the send. Without the DLQ
+  configured, the reconciler backstop above still rescues stuck campaigns —
+  just on a coarser (15-minute) timescale.
+- **Resend** — `POST /api/admin/campaigns/[id]/resend` (only from
+  `status='failed'`, atomic `failed` → `sending` claim) calls
+  `resendCampaign()`: re-resolves the current audience, excludes recipients
+  who already have a `sent` event, resets batch progress to just the
+  remainder, and re-enqueues. `recipient_count`/`sent_count` are preserved
+  across a resend so the "N of M delivered" ratio stays meaningful. The admin
+  campaign detail page shows a red "Resend to unsent recipients" banner on a
+  failed campaign.
+
+## Environment variables
+
+| Variable | Required | Default | Purpose |
+|---|---|---|---|
+| `CAMPAIGN_BATCH_SIZE` | No | `50` | Recipients per batch (queue message / job). |
+| `STUCK_CAMPAIGN_MINUTES` | No | `60` | Reconciler threshold — minutes a campaign can sit in `sending` with no progress before it's marked `failed`. |
+| `AGENTS_INTERNAL_SECRET` | Yes (prod queue/cron) | — | Shared secret authenticating `/api/internal/campaign-batch` and `/api/internal/campaign-cron` (header `x-agents-internal-secret`, constant-time compared via `lib/internal-auth.ts`). Same secret already used for the agents Worker's internal calls — **not** a separate `CRON_SECRET`. |
+
+## Prod deploy setup
+
+```bash
+wrangler queues create coomander-campaign-send
+# optional, for dead-letter recovery:
+wrangler queues create coomander-campaign-send-dlq
+```
+
+`wrangler secret put AGENTS_INTERNAL_SECRET` must already be set (shared with
+`apps/agents`) — the queue consumer and the campaign-cron route both refuse
+to run without it.
+
+## Key files
+
+- `lib/audiences.ts` — AudienceFilter parse/serialize/resolve, tags.
+- `lib/campaign-send.ts` — the batched producer/consumer + finalize/resend.
+- `lib/queue-consumer.ts` — CF Queue batch → internal HTTP POST, ack/retry/DLQ.
+- `app/api/internal/campaign-batch/route.ts` — runs one batch (or records a
+  dead-lettered one as failed).
+- `app/api/internal/campaign-cron/route.ts` — runs the 15-minute dispatch +
+  reconcile jobs.
+- `jobs/index.ts` — `dispatchScheduledCampaigns`, `reconcileStuckCampaigns`,
+  `send-campaign-batch` job handler, dev-cron registration.
+- `custom-worker.ts` — Workers `queue()` and `scheduled()` wiring.
+- `app/api/admin/campaigns/[id]/{send,schedule,cancel,resend}/route.ts`,
+  `app/api/admin/campaigns/audience-count/route.ts`,
+  `app/api/admin/subscribers/tags/route.ts`.
+- `app/admin/campaigns/[id]/page.tsx` — authoring UI, audience picker,
+  schedule/cancel, sending-progress poll, failed-state resend banner.
+- `components/admin/{audience-picker,tag-editor}.tsx`.

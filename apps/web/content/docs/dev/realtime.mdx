@@ -1,0 +1,240 @@
+---
+title: Realtime (channels & live events)
+description: The generic realtime layer — per-entity channels fanned out by a Durable Object, a server publish() helper, and a useRealtime() hook for web. How to publish, subscribe, and authorize channels.
+---
+
+# Realtime (channels & live events)
+
+The realtime layer delivers instant, server-pushed events to connected clients
+over WebSockets. It's a **generic, per-entity fan-out** primitive: any feature
+can publish an event to a channel, and every client subscribed to that channel
+receives it — without owning any Durable Object code. Notifications use it (the
+existing DB-backed notification is the source of truth; this is the instant
+push on top); the AI agent uses it for proactive messages (see
+[[ai-models]] for the chat engine). The runnable worked example is the
+**[ping demo](/app)** — the `RealtimeDemoCard` on the user dashboard.
+
+The whole layer is two helpers and one Worker:
+
+- `publish(channel, event)` — server side (`apps/web/lib/realtime.ts`).
+- `useRealtime(channel, onEvent)` — client side (`apps/web/lib/use-realtime.ts`).
+- The `RealtimeChannel` Durable Object + the `/realtime/*` gate, hosted in the
+  **existing** agents Worker (`apps/agents`, script name `coomander-agents` —
+  Coomander does not run a separate `apps/realtime` Worker like the AppSeed
+  template; the channel DO lives alongside `AppAgent`).
+
+## The channel model
+
+A channel is a string of the form `"<type>:<id>"` — type before the first
+colon, id after. The id may itself contain colons (`doc:project:42` → type
+`doc`, id `project:42`); only the first colon splits. Coomander ships three
+conventional types:
+
+- `user:<userId>` — a single user's personal channel (proactive agent messages,
+  the ping demo).
+- `notifications:<userId>` — the notification bell's channel (kept distinct
+  from `user:` for backward compat with the old SSE stream name).
+- `campaign:<id>` — **admin-only**, gated on the session's `role === "admin"`.
+  Any admin may watch any campaign's live send/open progress (a global admin
+  surface, not user-owned). `role` is undefined until the hardening slice wires
+  Better Auth's admin role/backfill onto the session — until then this channel
+  type is fail-closed (denied for everyone).
+- `doc:<id>` / `room:<id>` — **conventions for shared/collaborative channels**,
+  not yet implemented. Denied by default — adding them is an extension (see
+  [Channel authorization](#channel-authorization) below).
+
+Each distinct channel string maps to exactly **one Durable Object instance**
+(`REALTIME_CHANNEL.idFromName("<type>:<id>")`). Every socket connected to that
+instance receives every event broadcast to it.
+
+### Why a Durable Object (not in-process pub/sub)
+
+The realtime layer used to be an in-process `Map` of subscribers plus an SSE
+endpoint. That **only worked single-process**: on Cloudflare Workers each
+request can land on a different isolate, so a `publish()` running on isolate A
+could never reach a socket held open on isolate B. The fan-out silently dropped
+events in prod.
+
+A Durable Object fixes this because a named DO is a **single globally-unique
+instance**: no matter which isolate calls `publish()`, the request routes to the
+one DO that owns that channel, and that DO holds every socket for it. The DO
+uses the [WebSocket Hibernation API](https://developers.cloudflare.com/durable-objects/),
+so idle channels cost nothing — the instance evicts while sockets stay open and
+wakes on the next frame or broadcast.
+
+## Publishing (server)
+
+```ts
+import { publish } from "@/lib/realtime";
+
+// Fan an event out to every socket on the channel.
+await publish(`user:${userId}`, { type: "demo-ping", ts: Date.now() });
+```
+
+`publish()` prefers the `REALTIME` **service binding** to the agents Worker in
+prod (a direct worker-to-worker call — a public-URL fetch to the same zone
+loops and returns HTTP 522), and falls back to a plain HTTP POST to
+`REALTIME_ORIGIN` (default `http://127.0.0.1:8788`) only under `next dev`. Both
+paths land on the agents Worker's `/realtime/internal/publish` route
+(authenticated with the shared `AGENTS_INTERNAL_SECRET`), which forwards to the
+channel DO's `broadcast()`.
+
+Two rules matter:
+
+- **It's best-effort and non-throwing.** A missing live push must never fail the
+  request. The caller has already persisted its source of truth (the
+  notification row in D1, etc.); the WebSocket fan-out is purely an
+  instant-delivery optimization. If the secret is unset, or the POST fails or
+  times out, `publish()` logs and returns — it never throws. Don't rely on its
+  return for correctness.
+- **`await` it (the Workers unawaited-promise caveat).** In a Workers runtime a
+  promise left running *after* the response has been returned can be cancelled
+  before it completes, silently dropping the push. In a Next API route, always
+  `await publish(...)` (or hand it to the platform `ctx.waitUntil`) so the
+  request stays alive until the event is sent. This is documented inline in
+  `lib/realtime.ts` — read it before fire-and-forgetting.
+
+The event is any JSON object; by convention it carries a `type` discriminator so
+the client can branch (`new-notification`, `agent-message`, `demo-ping`, …).
+
+## Subscribing (client)
+
+```ts
+import { useRealtime, type RealtimeEvent } from "@/lib/use-realtime";
+
+useRealtime(`user:${userId}`, (event: RealtimeEvent) => {
+  if (event.type === "demo-ping") {
+    // update local state — no refetch, no page reload
+  }
+});
+```
+
+The hook opens a WebSocket to `/realtime/<channel>` and invokes `onEvent` for
+each received event. Pass `null` as the channel to subscribe to nothing (e.g.
+while the user id is still loading) — the hook tears down cleanly on
+unmount / channel change.
+
+- **Mobile has a matching hook** at `apps/mobile/src/lib/use-realtime.ts` — same
+  public API (`useRealtime(channel, onEvent)`, same `RealtimeEvent` type). It
+  can't rely on the browser attaching the session cookie same-origin, so it
+  injects `Cookie: authClient.getCookie()` on the WS upgrade via React Native's
+  3-arg `new WebSocket(url, protocols, { headers })` (mirroring
+  `use-agent-socket.ts`). It also swaps the web hook's `visibilitychange`
+  listener for React Native's `AppState`: the socket closes on
+  background/inactive and reconnects immediately on `active`, since mobile OSes
+  freeze/kill background sockets. The mobile chat screen
+  (`apps/mobile/src/app/(app)/index.tsx`) subscribes to `user:<id>` and renders
+  `agent-message` events the same way the web chat page does.
+- **The client keeps the socket warm.** The hook sends a `{type:"ping"}`
+  heartbeat every 25s. The DO only revalidates the session on inbound frames, so
+  the heartbeat both keeps an authenticated socket alive and lets idle proxies
+  not drop it. The matching `{type:"pong"}` reply is swallowed by the hook — your
+  `onEvent` never sees `ping`/`pong`. (This is why the ping demo uses the event
+  type `demo-ping`, not `ping`: a literal `ping` would be eaten as a heartbeat.)
+- **Reconnect is automatic** with capped exponential backoff (1s → 30s, reset on
+  a clean open). A `1008` close (auth rejected/expired) stops reconnection —
+  retrying would just be refused again.
+
+## Channel authorization
+
+Every subscription is gated **before any DO is touched**. The `/realtime/*`
+route in `apps/agents/src/index.ts` validates the Better Auth session cookie
+(a non-101 response refuses the WebSocket handshake), then calls
+`authorizeChannel(parsed, user)` from `apps/agents/src/channel/routing.ts`.
+That function is the **single authorization seam** — a pure, synchronous,
+deny-by-default policy:
+
+```ts
+// apps/agents/src/channel/routing.ts
+export function authorizeChannel(
+  parsed: ParsedChannel,
+  user: { id: string; role?: string },
+): boolean {
+  switch (parsed.type) {
+    case "user":
+    case "notifications":
+      return parsed.id === user.id;    // own channel only
+    case "campaign":
+      return user.role === "admin";    // admin-only, fail-closed
+    default:
+      return false;                    // unknown type → denied
+  }
+}
+```
+
+Coomander policy: a user may subscribe only to `user:<their own id>` and
+`notifications:<their own id>`; an admin may subscribe to any `campaign:<id>`.
+**Every unknown type is denied** — Coomander ships no membership model for
+`doc`/`room`, so the safe default is to refuse.
+
+### Adding a `doc:` / `room:` authorizer (downstream)
+
+Shared channels are an extension, and `routing.ts` is the **only file you
+touch**. Add a case with your membership check:
+
+```ts
+case "doc":
+  // does this user have access to this document?
+  return userCanAccessDoc(user.id, parsed.id);
+```
+
+If the membership check needs to hit a database or the web API (it usually
+does), **swap the synchronous authorizer for an async one**. The signature is
+kept pure & synchronous today, but it's designed to be replaced with
+`(parsed, user, env) => Promise<boolean>` that queries the web app — the worker
+gate `await`s it before forwarding to the DO. Keep this the only place that
+decides who may subscribe to what; the DO trusts only the gate-validated
+identity passed via internal headers, never anything the client supplies.
+
+## Where it runs
+
+Both the `RealtimeChannel` DO and the agent (`AppAgent`) live in the **same
+`apps/agents` Worker** (`coomander-agents`). The Worker owns the `/realtime/*`
+and `/agents/*` routes in the app's zone, so the session cookie flows to both.
+In dev, Caddy (`tailscale/Caddyfile`) proxies both `/agents/*` and
+`/realtime/*` to the Worker on the shared netns (`127.0.0.1:8788`), reachable
+via the tailnet HTTPS URL — same-origin so the Better Auth cookie flows on the
+WebSocket upgrade. In prod, `apps/agents/wrangler.toml`'s `[env.production]`
+declares matching `coomander.com/agents/*` and `coomander.com/realtime/*`
+route patterns (both commented until deploy, same operator gate as the rest of
+the agents Worker), and `publish()`'s server-to-server POST goes over the
+`REALTIME` service binding (`apps/web/wrangler.toml`), never a public hop.
+
+The agent is **one publisher among many** — it has no special status in the
+realtime layer. Real publishers in Coomander today:
+
+- **Notifications** (`apps/web/lib/notifications.ts`) — the production example.
+  `createNotification()` writes the row to D1 (source of truth), then publishes a
+  `new-notification` event to the user's `notifications:<id>` channel.
+  `NotificationBell` subscribes via `useRealtime` and prepends the new row live.
+- **Agent proactive delivery** (`apps/agents/src/index.ts` →
+  `AppAgent.deliverProactive`) — the agent publishes an
+  `{type:"agent-message"}` event to the user's `user:<id>` channel (not its own
+  chat socket). If zero sockets receive it, it falls back to Coomander's
+  Telegram delivery (`apps/agents/src/web-api.ts` → `deliverTelegramFallback`)
+  rather than an in-app notification — Coomander's users live on Telegram.
+
+## The ping demo (worked example)
+
+The `RealtimeDemoCard` on `/app` (the user dashboard, in the "detail behind the
+agent" grid alongside Cadence/Insights) is the runnable end-to-end example. It
+wires the whole path with no database row in the middle, so a working ping
+proves the plumbing:
+
+```
+"Send ping" button
+  → POST /api/realtime-demo/ping               (any signed-in user)
+  → publish("user:<callerId>", { type: "demo-ping", ts })
+  → agents Worker /realtime/internal/publish
+  → RealtimeChannel DO broadcast
+  → every socket on user:<callerId>
+  → useRealtime("user:<callerId>") fires in the widget → counter ticks (no reload)
+```
+
+The route (`apps/web/app/api/realtime-demo/ping/route.ts`) publishes to
+the **caller's own** user channel, which is exactly what `authorizeChannel`
+permits — so the demo needs no custom authorizer. The card
+(`apps/web/components/realtime-demo-card.tsx`) fetches the session for the user
+id (mirroring `NotificationBell`), subscribes, and renders a live counter incremented by
+each `demo-ping`. Use it as the copy-paste starting point for a new realtime
+feature; use **notifications** as the production reference.

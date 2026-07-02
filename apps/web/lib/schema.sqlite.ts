@@ -28,7 +28,18 @@ export const user = sqliteTable("user", {
   stripeSubscriptionId: text("stripeSubscriptionId"),
   subscriptionStatus: text("subscriptionStatus").default("inactive"),
   isAdmin: integer("isAdmin").notNull().default(0),
+  // Legacy, unenforced-on-its-own flag — superseded by the Better Auth admin
+  // plugin's banned/banExpires below (session.create.before hook rejects
+  // sign-in for banned users). Kept for display/back-compat; no new code
+  // should gate on it. See lib/auth.ts admin() plugin comment.
   disabled: integer("disabled").notNull().default(0),
+  // Better Auth admin plugin (ban semantics) — role is this app's admin gate
+  // bridge (synced to "admin" wherever isAdmin=1); banned/banReason/banExpires
+  // are enforced natively by the plugin's session-create hook.
+  role: text("role").default("user"),
+  banned: integer("banned").default(0),
+  banReason: text("banReason"),
+  banExpires: integer("banExpires"),
   // Coomander (#151): Telegram destination + opt-in flag for the ops agent.
   telegramChatId: text("telegramChatId"),
   coomanderEnabled: integer("coomanderEnabled").notNull().default(0),
@@ -289,6 +300,9 @@ export const emailCampaigns = sqliteTable("email_campaigns", {
   audience_filter: text("audience_filter").default("{}"),
   recipient_count: integer("recipient_count").default(0),
   sent_count: integer("sent_count").default(0),
+  batches_total: integer("batches_total").default(0),
+  batches_done: integer("batches_done").default(0),
+  batches_failed: integer("batches_failed").default(0),
   scheduled_at: text("scheduled_at"),
   sent_at: text("sent_at"),
   resend_broadcast_id: text("resend_broadcast_id"),
@@ -298,6 +312,22 @@ export const emailCampaigns = sqliteTable("email_campaigns", {
 }, (table) => [
   index("idx_campaigns_status").on(table.status),
   index("idx_campaigns_created_at").on(table.created_at),
+]);
+
+// Per-batch idempotency for the send engine (migration 027, sync #222 fix):
+// advanceBatchProgress records a row here (campaign_id, batch_id) before
+// incrementing email_campaigns.batches_done, so a Cloudflare Queues
+// at-least-once REDELIVERY of an already-processed batch can't double-count
+// batches_done (and prematurely finalize the campaign as 'sent'). Rows are
+// cleared per-campaign at the start of every fresh send/resend so batch ids
+// (positional within that send attempt) never collide across attempts.
+export const campaignSendBatches = sqliteTable("campaign_send_batches", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  campaign_id: text("campaign_id").notNull(),
+  batch_id: text("batch_id").notNull(),
+  created_at: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  uniqueIndex("idx_csb_campaign_batch_unique").on(table.campaign_id, table.batch_id),
 ]);
 
 export const _migrations = sqliteTable("_migrations", {

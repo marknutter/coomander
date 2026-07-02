@@ -28,6 +28,7 @@ async function fetchUserFromDb(id: string): Promise<UserDetail | null> {
     stripeSubscriptionId: string | null;
     emailVerified: number;
     disabled: number | null;
+    banned: number | null;
     provider: string | null;
     override_plan: string | null;
     override_reason: string | null;
@@ -48,6 +49,7 @@ async function fetchUserFromDb(id: string): Promise<UserDetail | null> {
        u.${q("stripeSubscriptionId")} AS "stripeSubscriptionId",
        u.${q("emailVerified")} AS "emailVerified",
        u.disabled,
+       u.banned,
        (SELECT a.${q("providerId")} FROM account a WHERE a.${q("userId")} = u.id LIMIT 1) AS provider,
        po.plan AS override_plan,
        po.reason AS override_reason,
@@ -82,7 +84,9 @@ async function fetchUserFromDb(id: string): Promise<UserDetail | null> {
     stripeSubscriptionId: user.stripeSubscriptionId,
     provider: user.provider ?? "email",
     emailVerified: user.emailVerified === 1,
-    disabled: user.disabled === 1,
+    // `banned` (admin-plugin, enforced by Better Auth) is the source of truth.
+    // Treat a legacy `disabled=1` as disabled too for backward compat.
+    disabled: user.banned === 1 || user.disabled === 1,
     planOverride: user.override_plan
       ? {
           plan: user.override_plan,

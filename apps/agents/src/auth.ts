@@ -4,6 +4,14 @@ export type SessionUser = {
   id: string;
   email?: string;
   name?: string;
+  /**
+   * The Better Auth admin-plugin `role` surfaced on the session user, once the
+   * hardening slice (#222) wires it up (synced from the app's `isAdmin=1`).
+   * Carried here so `authorizeChannel` can gate admin-only realtime channels
+   * (e.g. `campaign:<id>`) without a second round-trip to the web API. Absent
+   * until then — `authorizeChannel` fails closed on undefined role.
+   */
+  role?: string;
 };
 
 /** Session endpoint failed (unreachable / 5xx) — distinct from "no session". */
@@ -65,11 +73,12 @@ export async function validateSessionCookie(
   // Better Auth returns JSON `null` (200) when there is no session, and
   // { session, user } when there is one.
   const data = (await res.json().catch(() => null)) as {
-    user?: { id?: unknown; email?: string; name?: string };
+    user?: { id?: unknown; email?: string; name?: string; role?: unknown };
   } | null;
 
   const userId = data?.user?.id;
   if (typeof userId !== "string" || userId.length === 0) return null;
 
-  return { id: userId, email: data?.user?.email, name: data?.user?.name };
+  const role = typeof data?.user?.role === "string" ? data.user.role : undefined;
+  return { id: userId, email: data?.user?.email, name: data?.user?.name, role };
 }

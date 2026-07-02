@@ -22,6 +22,12 @@
  *            { type: "token", text }
  *            { type: "done", conversationId, fullText }
  *            { type: "error", message }
+ *
+ * NOTE (#222): agent-initiated proactive/scheduled messages no longer arrive
+ * on this socket. AppAgent.deliverProactive() now publishes to the user's
+ * `user:{id}` realtime channel (apps/agents/src/channel) instead of
+ * broadcasting a `proactive` frame here — subscribe via
+ * `useRealtime("user:<id>", ...)` in the chat page for those.
  */
 
 import { useCallback, useEffect, useRef } from "react";
@@ -36,15 +42,6 @@ export interface AgentChatCallbacks {
   onDone: (conversationId: string, fullText: string) => void;
   /** A user-safe error message. */
   onError: (message: string) => void;
-  /**
-   * An agent-initiated message pushed OUTSIDE any user turn — e.g. a scheduled
-   * follow-up reminder fired by the AppAgent (`schedule_followup` / a
-   * `deliverProactive` broadcast). Without a handler here these frames are
-   * silently dropped and the reminder never shows. `conversationId` is the
-   * thread the agent persisted it into (when the wake carried one), so the UI
-   * can render it in place rather than as a throwaway bubble.
-   */
-  onProactive: (message: string, conversationId?: string) => void;
   /** Socket connection state changed. */
   onStatusChange?: (status: "connecting" | "open" | "closed") => void;
 }
@@ -60,8 +57,7 @@ type ServerFrame =
   | { type: "conversation"; conversationId: string }
   | { type: "token"; text: string }
   | { type: "done"; conversationId: string; fullText: string }
-  | { type: "error"; message: string }
-  | { type: "proactive"; message: string; conversationId?: string };
+  | { type: "error"; message: string };
 
 /**
  * Open a WebSocket to the AppAgent and return a stable handle. The socket
@@ -77,6 +73,20 @@ export function useAgentChat(callbacks: AgentChatCallbacks): AgentChatHandle {
     cbRef.current = callbacks;
   });
   const openRef = useRef(false);
+  const mountedRef = useRef(false);
+
+  // partysocket auto-connects on mount and auto-reconnects with backoff, but it
+  // exposes no "connecting" event — so we synthesize one. Emitting "connecting"
+  // on mount gives the UI a real connect-in-progress signal during the (often
+  // multi-second) initial handshake instead of a dead/ambiguous state.
+  // Guarded on openRef in case the socket opened before this effect ran.
+  useEffect(() => {
+    mountedRef.current = true;
+    if (!openRef.current) cbRef.current.onStatusChange?.("connecting");
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const agent = useAgent({
     agent: "AppAgent",
@@ -89,6 +99,10 @@ export function useAgentChat(callbacks: AgentChatCallbacks): AgentChatHandle {
     onClose: () => {
       openRef.current = false;
       cbRef.current.onStatusChange?.("closed");
+      // partysocket will auto-reconnect with backoff (unless we're unmounting),
+      // so reflect that as a renewed "connecting" — the UI shows "reconnecting"
+      // rather than a terminal "closed".
+      if (mountedRef.current) cbRef.current.onStatusChange?.("connecting");
     },
     onError: () => {
       cbRef.current.onError("Connection error. Please try again.");
@@ -113,9 +127,6 @@ export function useAgentChat(callbacks: AgentChatCallbacks): AgentChatHandle {
           break;
         case "error":
           cbRef.current.onError(frame.message);
-          break;
-        case "proactive":
-          cbRef.current.onProactive(frame.message, frame.conversationId);
           break;
       }
     },

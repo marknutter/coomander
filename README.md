@@ -81,7 +81,7 @@ If the tailnet hostname doesn't resolve on iPhone: open the Tailscale iOS app �
 
 ### OAuth callback URLs
 
-OAuth providers (Google, GitHub, Microsoft) need both URLs allow-listed:
+OAuth providers (Google, GitHub, etc.) need both URLs allow-listed:
 
 - `https://coomander.com/api/auth/callback/<provider>` — production
 - `https://coomander.gate-cardassian.ts.net/api/auth/callback/<provider>` — tailnet dev
@@ -155,6 +155,8 @@ Then open the app (localhost:3005 or the tailnet URL), go to the home/onboarding
 | `COOMANDER_BOT_USERNAME` | No | @username (no @) for the Connect-Telegram deep link; defaults to `coomander_bot`. Set to your dev bot's username in local dev. |
 | `TELEGRAM_WEBHOOK_URL` | Local Telegram dev | Public webhook URL used by `npm run telegram:webhook -- set` (your Cloudflare Tunnel host + `/api/coomander/webhook`). |
 | `CLOUDFLARE_TUNNEL_TOKEN` | Local Telegram dev | Token for the `cloudflared` sidecar; goes in the repo-root `.env`. See "Local Telegram dev". |
+| `CAMPAIGN_BATCH_SIZE` | No | Recipients per email-campaign send batch (queue message / job); defaults to `50`. See [Email Marketing (Campaigns)](/docs/dev/email-marketing). |
+| `STUCK_CAMPAIGN_MINUTES` | No | Minutes a campaign can sit in `sending` with no progress before the reconciler marks it `failed`; defaults to `60`. |
 
 Local: put these in `node/.env.local` (gitignored). Production: `npx wrangler secret put VAR_NAME`.
 
@@ -200,6 +202,7 @@ npm run deploy:cf
 | New non-secret env var | Edit `wrangler.toml [vars]`, then deploy |
 | New D1/R2/KV binding | Edit `wrangler.toml`, deploy |
 | Promote a user to admin | `npx wrangler d1 execute coomander-db --remote --command "UPDATE user SET isAdmin = 1 WHERE email = 'you@example.com'"` |
+| First deploy after this doc — campaign send queue | `wrangler queues create coomander-campaign-send` (see [Email Marketing (Campaigns)](/docs/dev/email-marketing)) |
 
 ### Sanity checks
 
@@ -984,21 +987,20 @@ discord: {
 },
 ```
 
-Also add it to `account.accountLinking.trustedProviders` and add a button in `app/auth/page.tsx`'s `SOCIAL_PROVIDERS` array (providers already included: Google, GitHub, Apple, Facebook, Microsoft).
+Also add it to `account.accountLinking.trustedProviders` and add a button in `app/auth/page.tsx`'s `SOCIAL_PROVIDERS` array (providers already included: Google, GitHub, Apple, Facebook).
 
 ### Configuring OAuth providers (getting the actual credentials)
 
-The five built-in SSO providers each require different steps to obtain credentials:
+The four built-in SSO providers each require different steps to obtain credentials:
 
 | Provider  | Automation level | Method |
 |-----------|-----------------|--------|
-| Microsoft | **Fully automated** | `az` CLI — no browser required |
 | Google    | Semi-automated | Browser-guided (3-minute walkthrough) |
 | GitHub    | Semi-automated | Browser-guided (2-minute walkthrough) |
 | Facebook  | Semi-automated | Browser-guided (~5 minutes) |
 | Apple     | Mostly guided  | Browser for setup, automated JWT generation |
 
-**If using Claude Code** — use the `/configure-sso` skill. It handles detection, automation, and guided walkthroughs for all five providers, writing credentials to `.env.local` automatically.
+**If using Claude Code** — use the `/configure-sso` skill. It handles detection, automation, and guided walkthroughs for all four providers, writing credentials to `.env.local` automatically.
 
 Install once:
 ```bash
@@ -1011,13 +1013,6 @@ Then from any downstream project:
 ```
 
 **If using OpenClaw** — the same skill is available. Install with `bash scripts/install-openclaw-skills.sh`, then use `/configure-sso` from any OpenClaw session. Uses OpenClaw's `browser` tool for automation instead of Chrome DevTools MCP.
-
-**Microsoft only (no Claude Code needed):**
-```bash
-bash scripts/configure-microsoft-sso.sh
-```
-
-Runs the full `az` CLI flow unattended and writes `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET`, and `MICROSOFT_TENANT_ID` to `.env.local`.
 
 **Apple-specific note:** `APPLE_CLIENT_SECRET` is a JWT that expires every 180 days. Set a calendar reminder to regenerate it — run `/configure-sso` and select Apple, or re-run the JWT generation step manually.
 

@@ -22,6 +22,21 @@ export type {
   CostTier,
 } from "./model-catalog";
 
+// Rich chat blocks (inline charts/images) — shared parser + strippers.
+export {
+  BLOCK_MARKER_PREFIXES,
+  parseRichSegments,
+  stripTrailingPartialMarker,
+  stripSystemTags,
+  stripAllTags,
+} from "./rich-blocks";
+export type { RichSegment, BlockType } from "./rich-blocks";
+
+// Validated [CHART:{…}] payload shape — the single source of truth for what
+// counts as a valid chart, consumed by the web ChatChart renderer.
+export { chartSpecSchema, parseChartSpec } from "./chart-spec";
+export type { ChartSpec, ChartSeries } from "./chart-spec";
+
 // Capability-gated multimodal message building + context trimming.
 export {
   applyContextWindow,

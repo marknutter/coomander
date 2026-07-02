@@ -37,8 +37,13 @@ assets = { directory = ".open-next/assets", binding = "ASSETS" }
 # lands. Keep in sync with custom-worker.ts CRON_SLOT and scheduling.ts.
 # Daily slots + the Sunday-evening weekly review ("0 1 * * 1" = Mon 01:00 UTC =
 # Sun 8pm CT; custom-worker.ts routes it to /api/coomander/weekly-review).
+#
+# The 15-minute expression is the campaign engine's recurring-jobs tick (#597,
+# epic #595, sync #222) — custom-worker.ts routes it to
+# /api/internal/campaign-cron, which dispatches due scheduled sends (and, once
+# the hardening follow-up lands, reconciles stuck sends).
 [triggers]
-crons = ["0 12 * * *", "0 18 * * *", "0 21 * * *", "0 1 * * *", "0 1 * * 1"]
+crons = ["0 12 * * *", "0 18 * * *", "0 21 * * *", "0 1 * * *", "0 1 * * 1", "*/15 * * * *"]
 
 # Plain env vars (non-secret). Secrets go through `wrangler secret put`.
 # Agents Worker (#192): AGENTS_INTERNAL_SECRET is a SECRET (not listed here) —
@@ -100,6 +105,46 @@ migrations_dir = "migrations"
 binding = "STORAGE"
 bucket_name = "coomander-storage"
 
+# ── Campaign send queue (#454, epic #595, sync #222) ───────────────────
+# Batched email-campaign send engine (lib/campaign-send.ts). The producer
+# binding enqueues one message per recipient batch; the consumer (this same
+# Worker — see custom-worker.ts `queue()` → lib/queue-consumer.ts) drains them
+# with CF Queue's native retry/backoff, replaying each through
+# POST /api/internal/campaign-batch (authenticated with AGENTS_INTERNAL_SECRET,
+# NOT a CRON_SECRET). Create the queue before first deploy:
+#   wrangler queues create coomander-campaign-send
+[[queues.producers]]
+binding = "CAMPAIGN_QUEUE"
+queue = "coomander-campaign-send"
+
+[[queues.consumers]]
+queue = "coomander-campaign-send"
+max_batch_size = 10
+max_batch_timeout = 5
+max_retries = 5
+# RECOMMENDED for prod: a dead-letter queue so a batch that exhausts
+# max_retries (e.g. sustained rate-limiting) lands somewhere inspectable
+# instead of being silently dropped. A dead-lettered batch is recorded as a
+# FAILED batch (lib/queue-consumer.ts detects a queue name ending "-dlq" and
+# posts ?dead=1 to /api/internal/campaign-batch) so the campaign finalizes to
+# 'failed' (admin can then Resend the unsent recipients) rather than sitting
+# in 'sending' forever. To enable:
+#   1. wrangler queues create coomander-campaign-send-dlq
+#   2. uncomment the dead_letter_queue line below AND the [[queues.consumers]]
+#      DLQ block, then redeploy.
+# (Left commented so a deploy without the DLQ created doesn't fail. Even
+# without it, the reconcile-stuck-campaigns cron backstop still rescues stuck
+# campaigns.)
+# dead_letter_queue = "coomander-campaign-send-dlq"
+
+# DLQ consumer — handleQueueBatch detects a queue ending in "-dlq" and records
+# each message as a failed batch (see lib/queue-consumer.ts). Uncomment with
+# the dead_letter_queue line above.
+# [[queues.consumers]]
+# queue = "coomander-campaign-send-dlq"
+# max_batch_size = 10
+# max_retries = 3
+
 # ── Video processor (Cloudflare Containers via separate Worker) ────────
 # Lives in node/workers/video-processor and owns the VideoProcessor
 # Container Class (ffmpeg + Whisper + Claude vision). Deployed
@@ -110,6 +155,17 @@ bucket_name = "coomander-storage"
 [[services]]
 binding = "VIDEO_PROCESSOR"
 service = "coomander-video-processor"
+
+# ── Realtime channel fan-out (#222) ─────────────────────────────────────
+# Direct worker-to-worker call to the agents Worker's generic RealtimeChannel
+# DO (apps/agents/src/channel). REQUIRED in prod — see lib/realtime.ts's
+# publish() doc comment: a same-zone public fetch to coomander.com loops and
+# 522s, so publish() must go through this binding, never plain HTTP, once
+# deployed. `service` is the agents worker's `name` from
+# apps/agents/wrangler.toml (same script both in dev and `[env.production]`).
+[[services]]
+binding = "REALTIME"
+service = "coomander-agents"
 
 # ── Durable Object cleanup (prod outage fix, 2026-06-18) ───────────────
 # A prior out-of-band deploy registered an `AppAgent` Durable Object on THIS
@@ -145,3 +201,15 @@ name = "coomander"
 # it for production. Powers the Telegram inbound classifier's Workers-AI path.
 [env.production.ai]
 binding = "AI"
+
+# Service bindings — NOT inherited from the top-level env, so redeclare for
+# production (see the [[durable_objects.bindings]]/[ai] precedent above and in
+# apps/agents/wrangler.toml: named envs never inherit bindings/vars/migrations).
+# REALTIME (#222) is the one this environment strictly needs at deploy time —
+# lib/realtime.ts's publish() requires the binding in prod (a public-URL fetch
+# to the same zone 522s). VIDEO_PROCESSOR is declared top-level only today
+# (pre-existing gap, not introduced by #222) — flagged here rather than
+# silently carried forward.
+[[env.production.services]]
+binding = "REALTIME"
+service = "coomander-agents"

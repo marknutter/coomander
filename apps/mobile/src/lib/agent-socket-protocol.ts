@@ -5,9 +5,10 @@
  * heart of the mobile streaming path and must stay portable.
  *
  * It mirrors the wire protocol the agents Worker speaks (apps/agents/src/chat.ts
- * for chat-turn frames + apps/agents/src/index.ts `deliverProactive` for the
- * out-of-turn `proactive` broadcast) and the web client that already consumes it
- * (apps/web/lib/use-agent-chat.ts).
+ * for chat-turn frames) and the web client that already consumes it
+ * (apps/web/lib/use-agent-chat.ts). Agent-initiated messages
+ * (apps/agents/src/index.ts `deliverProactive`) publish to the realtime
+ * channel instead — see the note below.
  *
  * ── WebSocket protocol ────────────────────────────────────────────────────
  * Client → server (one JSON frame per user turn):
@@ -21,10 +22,14 @@
  *   { type: "token"; text }                            // streamed model delta
  *   { type: "done"; conversationId; fullText }         // final, tag-stripped
  *   { type: "error"; message }                         // user-safe failure
- *   { type: "proactive"; message; conversationId? }    // agent-initiated nudge
  *
  * The hook (use-agent-socket.ts) wraps a raw RN WebSocket, parses each frame
  * with `parseServerFrame`, and folds it into `StreamState` via `reduce`.
+ *
+ * Agent-initiated ("proactive") messages no longer ride this socket (#222) —
+ * the agent is a TENANT of the realtime layer and publishes them as
+ * `{ type: "agent-message", ... }` on the user's `user:<id>` realtime channel
+ * instead (see `use-realtime.ts`).
  */
 
 /** Coomander has one unified thread per user; this is the sentinel id. */
@@ -52,8 +57,7 @@ export type ServerFrame =
   | { type: "conversation"; conversationId: string }
   | { type: "token"; text: string }
   | { type: "done"; conversationId: string; fullText: string }
-  | { type: "error"; message: string }
-  | { type: "proactive"; message: string; conversationId?: string };
+  | { type: "error"; message: string };
 
 /**
  * Parse a raw WebSocket payload into a typed ServerFrame, or null if it isn't a
@@ -86,16 +90,6 @@ export function parseServerFrame(data: unknown): ServerFrame | null {
         : null;
     case "error":
       return typeof o.message === "string" ? { type: "error", message: o.message } : null;
-    case "proactive":
-      return typeof o.message === "string"
-        ? {
-            type: "proactive",
-            message: o.message,
-            ...(typeof o.conversationId === "string"
-              ? { conversationId: o.conversationId }
-              : {}),
-          }
-        : null;
     default:
       return null;
   }
@@ -133,17 +127,15 @@ export function buildWsUrl(apiUrl: string, name = "me"): string {
 
 // ── Stream reducer (the testable heart) ──────────────────────────────────────
 
-/** An agent-initiated message pushed outside any user turn. */
-export interface ProactiveEvent {
-  message: string;
-  conversationId?: string;
-}
-
 /**
- * The evolving state of the live WebSocket stream for the current turn, plus the
- * out-of-turn proactive queue. The screen renders the in-progress assistant
- * bubble from `streamingText` (then `finalText` on done) and reacts to
- * `done` / `error` / `proactive`.
+ * The evolving state of the live WebSocket stream for the current turn. The
+ * screen renders the in-progress assistant bubble from `streamingText` (then
+ * `finalText` on done) and reacts to `done` / `error`.
+ *
+ * Agent-initiated ("proactive") messages no longer flow through this state
+ * (#222) — they arrive on the realtime channel (`use-realtime.ts`) as
+ * `{ type: "agent-message", ... }` and are handled independently by the
+ * screen.
  */
 export interface StreamState {
   /** Tokens accumulated for the in-flight assistant turn (null when idle). */
@@ -156,8 +148,6 @@ export interface StreamState {
   done: boolean;
   /** A user-safe error surfaced this turn (null = none). */
   error: string | null;
-  /** Proactive (agent-initiated) messages, in arrival order (append-only). */
-  proactive: ProactiveEvent[];
 }
 
 export const initialStreamState: StreamState = {
@@ -166,20 +156,18 @@ export const initialStreamState: StreamState = {
   conversationId: null,
   done: false,
   error: null,
-  proactive: [],
 };
 
 /**
  * Fold one server frame into the stream state. Pure and immutable — always
- * returns a NEW object (and a new `proactive` array when it changes); never
- * mutates the input. Unknown frame types return the same state reference.
+ * returns a NEW object; never mutates the input. Unknown frame types return
+ * the same state reference.
  *
  *   conversation → track conversationId (no text change)
  *   token        → append the delta to streamingText (null treated as "")
  *   done         → finalize: clear streamingText, set finalText + conversationId,
  *                  mark done
  *   error        → surface the message, clear streamingText
- *   proactive    → append to the proactive queue
  */
 export function reduce(state: StreamState, frame: ServerFrame): StreamState {
   switch (frame.type) {
@@ -197,19 +185,6 @@ export function reduce(state: StreamState, frame: ServerFrame): StreamState {
       };
     case "error":
       return { ...state, streamingText: null, error: frame.message };
-    case "proactive":
-      return {
-        ...state,
-        proactive: [
-          ...state.proactive,
-          {
-            message: frame.message,
-            ...(frame.conversationId !== undefined
-              ? { conversationId: frame.conversationId }
-              : {}),
-          },
-        ],
-      };
     default:
       return state;
   }
@@ -217,9 +192,7 @@ export function reduce(state: StreamState, frame: ServerFrame): StreamState {
 
 /**
  * Reset the per-turn fields before sending a new turn (or after handling a
- * finished/errored one). Preserves `conversationId` and the append-only
- * `proactive` queue (which the screen drains by tracking a processed index, so
- * clearing it here would desync that index).
+ * finished/errored one). Preserves `conversationId`.
  */
 export function resetTurn(state: StreamState): StreamState {
   return { ...state, streamingText: null, finalText: null, done: false, error: null };

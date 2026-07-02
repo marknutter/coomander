@@ -1,13 +1,14 @@
 "use client";
 
-import { useMemo } from "react";
-
-// Strip system tags that the AI injects for backend processing
-const SYSTEM_TAG_REGEX = /\[[A-Z_]+:[^\]]+\]/g;
-
-function stripSystemTags(text: string): string {
-  return text.replace(SYSTEM_TAG_REGEX, "").replace(/\s{2,}/g, " ").trim();
-}
+import { Fragment, useMemo } from "react";
+import {
+  parseRichSegments,
+  stripAllTags,
+  stripSystemTags,
+  stripTrailingPartialMarker,
+  type RichSegment,
+} from "@coomander/core";
+import { ChatBlock } from "./chat/chat-blocks";
 
 function renderMarkdown(text: string): React.ReactNode[] {
   const lines = text.split("\n");
@@ -150,8 +151,27 @@ function renderInline(text: string): React.ReactNode {
 
 export function ChatMessageContent({ content, role }: { content: string; role: "user" | "assistant" }) {
   const rendered = useMemo(() => {
-    if (role === "user") return <span>{stripSystemTags(content)}</span>;
-    return <div>{renderMarkdown(stripSystemTags(content))}</div>;
+    // User messages never carry rich blocks — strip everything (incl. any
+    // block markers) and echo as plain text.
+    if (role === "user") return <span>{stripAllTags(content)}</span>;
+
+    // Assistant: hide a still-streaming partial block marker tail, then strip
+    // backend system tags ([PROFILE:]/[STEP_*:]) while KEEPING [CHART:]/
+    // [IMAGE:] block markers intact, then split into text + block segments and
+    // dispatch each block to <ChatBlock> (markdown renders in place for text).
+    const cleaned = stripSystemTags(stripTrailingPartialMarker(content));
+    const segments = parseRichSegments(cleaned);
+    return (
+      <div>
+        {segments.map((seg: RichSegment, i: number) =>
+          seg.kind === "block" ? (
+            <ChatBlock key={i} block={seg} />
+          ) : (
+            <Fragment key={i}>{renderMarkdown(seg.text)}</Fragment>
+          ),
+        )}
+      </div>
+    );
   }, [content, role]);
 
   return rendered;
