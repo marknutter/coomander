@@ -94,11 +94,20 @@ async function handleDeliverWebhook(payload: Record<string, unknown>): Promise<v
   await deliverWebhook(payload);
 }
 
+// Campaign send batch (#454, epic #595, sync #222): the dev/non-Workers
+// transport for lib/campaign-send.ts's producer/consumer. Lazy-imported so
+// campaign-send's Cloudflare-context probe doesn't run at module load time.
+async function handleCampaignBatch(payload: Record<string, unknown>): Promise<void> {
+  const { processCampaignBatch } = await import("@/lib/campaign-send");
+  await processCampaignBatch(payload as unknown as import("@/lib/campaign-send").CampaignBatchPayload);
+}
+
 export function registerBuiltinJobs(): void {
   registerJob("cleanup-sessions", cleanupSessions);
   registerJob("cleanup-unverified", cleanupUnverified);
   registerJob("sync-stripe-status", syncStripeStatus);
   registerJob("deliver-webhook", handleDeliverWebhook);
+  registerJob("send-campaign-batch", handleCampaignBatch);
   log.info("Built-in job handlers registered");
 }
 

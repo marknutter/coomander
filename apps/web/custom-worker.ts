@@ -24,6 +24,7 @@
  * same way geology does.
  */
 import { default as handler } from "./.open-next/worker.js";
+import { handleQueueBatch } from "./lib/queue-consumer";
 
 // Tight-preset cron (UTC) -> slot. Mirror of scheduling.ts CRON_SLOT_MAP.
 const CRON_SLOT = {
@@ -59,6 +60,14 @@ const worker = {
     const slot = CRON_SLOT[event.cron] ?? "check";
     const res = await post("/api/coomander/run", env, ctx, { slot });
     console.log(`[cron] coomander cron="${event.cron}" slot="${slot}" -> ${res.status} ${await res.text().catch(() => "")}`);
+  },
+
+  // CAMPAIGN_QUEUE consumer (#454, epic #595, sync #222). Each message is
+  // replayed through the app's own fetch pipeline (POST
+  // /api/internal/campaign-batch) so the batch runs with a real request
+  // context + D1 binding. See lib/queue-consumer.ts.
+  queue(batch, env, ctx) {
+    return handleQueueBatch(batch, env, ctx, handler.fetch);
   },
 };
 
