@@ -16,15 +16,23 @@ ANTHROPIC_API_KEY=sk-ant-...
 # CHAT_MODEL=claude-sonnet-4-6
 # CHAT_MAX_TOKENS=600
 
-# Cloudflare auth for the [ai] Workers AI binding (#203). `wrangler dev` cannot
-# run Workers AI inference in local miniflare, so it proxies the `AI` binding to
-# REMOTE Cloudflare — and it does that by deploying a temporary preview Worker,
-# so the token needs WORKERS SCRIPTS access. A Workers-AI-only token 403s on
-# edge-preview and `wrangler dev` never starts. Create one from the "Edit
-# Cloudflare Workers" template (Workers Scripts: Edit) and ADD "Workers AI: Read".
+# Cloudflare auth for the [ai] Workers AI binding (#203) AND the generate_image
+# chat tool (#222 follow-up). `wrangler dev` cannot run Workers AI inference in
+# local miniflare, so it proxies the `AI` binding to REMOTE Cloudflare — and it
+# does that by deploying a temporary preview Worker, so the token needs WORKERS
+# SCRIPTS access. A Workers-AI-only token 403s on edge-preview and `wrangler dev`
+# never starts. Create one from the "Edit Cloudflare Workers" template (Workers
+# Scripts: Edit) and ADD "Workers AI: Read".
 # ‼️ In Docker dev the [ai] binding forces this remote proxy AT BOOT, so the
 # worker won't start without valid CF auth here EVEN for Claude-only chat.
 # (Non-Docker local dev can `wrangler login` via OAuth instead of a token.)
+#
+# The SAME token + account id also drive `generate_image` (tools.ts): it calls
+# the Workers AI REST endpoint for @cf/black-forest-labs/flux-1-schnell
+# DIRECTLY (not through the AI Gateway below — that gateway is wired for the
+# chat providers only). Without these two vars, generate_image returns a clear
+# "not configured" error and image generation is simply unavailable — chat
+# itself is unaffected.
 # CLOUDFLARE_API_TOKEN=...        # "Edit Cloudflare Workers" template + Workers AI: Read
 # CLOUDFLARE_ACCOUNT_ID=1ed6d9117731a48060db43fabbf1a468
 

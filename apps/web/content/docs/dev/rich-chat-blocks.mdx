@@ -107,10 +107,43 @@ beyond adding its `case`.
 
 ## Images
 
-See the `generate_image` tool (`apps/agents/src/tools.ts`) and
-`apps/web/components/chat/chat-image.tsx` for AI-generated inline images via
-`[IMAGE:{"key":…,"alt":…}]` — R2-backed, auth-scoped storage keys, per-user/day
-quota enforced in `POST /api/images`.
+The assistant can generate an image from a prompt and show it inline:
+
+```
+[IMAGE:{"key":"ai-images/<userId>/<YYYY-MM-DD>/<uuid>.<ext>","alt":"a mountain at sunrise"}]
+```
+
+- A **`generate_image`** AgentTool (`apps/agents/src/tools.ts`) the model calls
+  with a description. It generates the image via **Cloudflare Workers AI
+  `@cf/black-forest-labs/flux-1-schnell`** over the **direct Workers AI REST
+  endpoint** (`api.cloudflare.com/client/v4/accounts/<id>/ai/run/<model>`) —
+  NOT the AI Gateway used for chat, since that gateway's workers-ai route needs
+  gateway-level auth not provisioned for images, whereas the direct endpoint
+  needs only the account id + a Workers-AI-scoped token and works identically
+  in dev and prod.
+- The worker stores the bytes via the web app (service binding → `POST
+  /api/images`) in R2 under a **date-partitioned, auth-scoped** key
+  `ai-images/<userId>/<YYYY-MM-DD>/<uuid>.<ext>` and returns `{ key }`. The
+  model then embeds `[IMAGE:{"key":…,"alt":…}]`.
+- `GET /api/images/[...key]` serves the image **only** to the owning user (the
+  key must start with `ai-images/<userId>/`; `..`/backslash traversal and
+  prefix-confusion are rejected). flux returns JPEG; the store route sniffs
+  the real type from magic bytes and serves with
+  `X-Content-Type-Options: nosniff`.
+- **Quotas:** a soft per-conversation cap in the tool (fast first-line guard,
+  in-memory, resets on DO eviction) plus the **authoritative per-user/day cap
+  enforced in `POST /api/images`** (`apps/web/lib/storage.ts`'s
+  `countStoredUnder`, the real choke point — that route is directly callable
+  and the per-conversation cap is bypassable by opening new conversations). A
+  provider refusal/empty result surfaces a clear error, never silent dead air.
+- **Rendering:** `apps/web/components/chat/chat-image.tsx` parses `{ key, alt }`
+  and renders a constrained `<img src="/api/images/<key>">`; a malformed
+  payload throws so the `BlockErrorBoundary` shows its fallback.
+- **Secrets:** `CLOUDFLARE_ACCOUNT_ID` + a Workers-AI-scoped
+  `CLOUDFLARE_API_TOKEN` on the agents worker (`apps/agents/.dev.vars.example`
+  in dev; `wrangler secret put CLOUDFLARE_API_TOKEN --env production` in prod).
+  Without them, the tool returns a clear "not configured" error — chat itself
+  is unaffected.
 
 ## Chat transcript rendering (shadcn components)
 

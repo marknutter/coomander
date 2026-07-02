@@ -21,6 +21,7 @@
 import { Component, type ReactNode } from "react";
 import type { RichSegment } from "@coomander/core";
 import { ChatChart } from "./chat-chart";
+import { ChatImage } from "./chat-image";
 
 type Block = Extract<RichSegment, { kind: "block" }>;
 
@@ -57,9 +58,12 @@ export function ChatBlock({ block }: { block: Block }) {
     case "chart":
       inner = <ChatChart json={block.json} />;
       break;
-    // Cases are added by the slice that ships each renderer — until then, any
-    // block type falls through to the raw-text default below.
+    case "image":
+      inner = <ChatImage json={block.json} />;
+      break;
     default:
+      // A block type this build doesn't recognize falls back to its raw
+      // marker text rather than losing the content.
       inner = <span className="whitespace-pre-wrap">{block.raw}</span>;
   }
   return <BlockErrorBoundary>{inner}</BlockErrorBoundary>;

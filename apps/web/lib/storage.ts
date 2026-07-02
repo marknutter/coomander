@@ -283,6 +283,36 @@ export function getFileUrl(key: string): string {
 }
 
 /**
+ * Count stored objects under a key prefix. Used to enforce a per-user/day quota
+ * on AI-generated images (#222 follow-up) at the storage choke point. Best-effort:
+ *   - R2 binding: `list({ prefix })` (capped page is fine for a small quota).
+ *   - Local fs (dev): count files in the prefix directory.
+ *   - S3 / unknown: returns 0 (no list wired) — the soft worker-side cap still
+ *     applies; document if you deploy on S3 and need a hard ceiling.
+ */
+export async function countStoredUnder(prefix: string): Promise<number> {
+  if (isD1()) {
+    const r2 = resolveR2Binding() as
+      | (R2Binding & { list?: (o: { prefix: string }) => Promise<{ objects?: unknown[] }> })
+      | null;
+    if (r2?.list) {
+      const res = await r2.list({ prefix });
+      return Array.isArray(res?.objects) ? res.objects.length : 0;
+    }
+    return 0;
+  }
+  if (!isD1()) {
+    try {
+      const dir = path.join(UPLOADS_DIR, prefix);
+      return fs.existsSync(dir) ? fs.readdirSync(dir).length : 0;
+    } catch {
+      return 0;
+    }
+  }
+  return 0;
+}
+
+/**
  * Get the current storage backend name (for diagnostics / health checks).
  */
 export function getStorageBackendName(): string {
