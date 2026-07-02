@@ -60,8 +60,10 @@ export async function extractAndProcessTags(
 }
 
 /**
- * Strip tags from text without processing (for display only).
+ * Strip backend system tags ([PROFILE:]/[STEP_*:]) for display, but PRESERVE
+ * [CHART:]/[IMAGE:] rich-block markers so inline charts/images render while a
+ * reply streams and after reload. Delegates to the single shared
+ * implementation in @coomander/core. (Use `stripAllTags` from @coomander/core
+ * where blocks must also go — user-message echo, mobile, TTS.)
  */
-export function stripTags(text: string): string {
-  return text.replace(/\[[A-Z_]+:[^\]]+\]/g, "").trim();
-}
+export { stripSystemTags as stripTags } from "@coomander/core";

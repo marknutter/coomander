@@ -19,7 +19,7 @@ import { useRouter } from "expo-router";
 import { getThread, type CoomanderMessage } from "@/lib/api";
 import { useTheme } from "@/lib/theme";
 import { Screen } from "@/components/screen";
-import { ApiError } from "@coomander/core";
+import { ApiError, stripAllTags } from "@coomander/core";
 import {
   useAgentSocket,
   type SocketStatus,
@@ -39,11 +39,12 @@ import {
 const SOCKET_READY_TIMEOUT_MS = 8000;
 
 // ---------------------------------------------------------------------------
-// Tag stripping (matches the web's stripTags)
+// Tag stripping (matches the web's stripTags). Mobile has no rich-block
+// renderer, so it strips block markers too (@coomander/core stripAllTags).
 // ---------------------------------------------------------------------------
 
 function stripTags(text: string): string {
-  return text.replace(/\[TAG:\w+=[^\]]+\]/g, "").trim();
+  return stripAllTags(text);
 }
 
 // ---------------------------------------------------------------------------
