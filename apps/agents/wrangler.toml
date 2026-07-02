@@ -23,12 +23,17 @@ WEB_ORIGIN = "http://127.0.0.1:3000"
 CLOUDFLARE_ACCOUNT_ID = "1ed6d9117731a48060db43fabbf1a468"
 # AI_GATEWAY_ID = "coomander-gateway"
 
-# Workers AI binding — lets the agent run open (Workers AI) models via
-# createWorkersAI({ binding: env.AI }), mirroring the app worker (#203). Billed
-# via the Cloudflare account; no API key. Named envs do NOT inherit bindings, so
-# this is redeclared under [env.production] below.
-[ai]
-binding = "AI"
+# NOTE: no top-level [ai] binding (#222, dropped 2026-06-26 upstream). A
+# Workers-AI binding has no local emulation, so its presence forces
+# `wrangler dev` into REMOTE mode — every WS connect tunnels the Better Auth
+# session check back to the local web app over Cloudflare's network, adding
+# seconds per connect and occasionally dropping, and it requires a
+# CLOUDFLARE_API_TOKEN just to boot dev. Dropping it here does not change dev
+# chat behavior: resolveAgentModel() (chat-model.ts) already falls back to the
+# default Claude/BYOK path (ANTHROPIC_API_KEY) whenever env.AI is absent. To
+# exercise open Workers-AI models locally, temporarily re-add this binding
+# (and accept remote dev mode). [env.production.ai] below is UNCHANGED — prod
+# runs natively (no tunnel) and keeps its own binding.
 
 # Secrets (NOT declared here): ANTHROPIC_API_KEY (chat) and
 # AGENTS_INTERNAL_SECRET (server-to-server calls for scheduled wakes) come from
@@ -42,9 +47,20 @@ binding = "AI"
 name = "AppAgent"
 class_name = "AppAgent"
 
+# Generic per-entity realtime fan-out channel (#222, ported from the AppSeed
+# realtime epic). One DO instance per "<type>:<id>" channel address; any
+# feature can publish to it without owning DO code. See src/channel/.
+[[durable_objects.bindings]]
+name = "REALTIME_CHANNEL"
+class_name = "RealtimeChannel"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["AppAgent"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["RealtimeChannel"]
 
 # ── Production (`wrangler deploy --env production`) ───────────────────────────
 # Daily dev uses the top-level env above (`wrangler dev` — no route, no service
@@ -62,12 +78,17 @@ new_sqlite_classes = ["AppAgent"]
 name = "coomander-agents"
 
 # Same Cloudflare zone as the OpenNext app worker so the Better Auth session
-# cookie flows. This `/agents/*` pattern route is more specific than the app
-# worker's custom-domain route on the same host, so Cloudflare routes
-# `/agents/*` here and everything else to the app worker (`coomander`).
+# cookie flows. These pattern routes are more specific than the app worker's
+# custom-domain route on the same host, so Cloudflare routes `/agents/*` and
+# `/realtime/*` here and everything else to the app worker (`coomander`).
+# `/realtime/*` (#222) carries the generic RealtimeChannel DO's WebSocket
+# upgrades (browser) and the internal publish RPC (the web app's REALTIME
+# service binding routes by pathname, not URL host, but the pattern still must
+# exist for this Worker to own the route table entry).
 # Uncomment to go live:
 routes = [
   { pattern = "coomander.com/agents/*", zone_name = "coomander.com" },
+  { pattern = "coomander.com/realtime/*", zone_name = "coomander.com" },
 ]
 
 [env.production.vars]
@@ -95,9 +116,17 @@ service = "coomander"
 name = "AppAgent"
 class_name = "AppAgent"
 
+[[env.production.durable_objects.bindings]]
+name = "REALTIME_CHANNEL"
+class_name = "RealtimeChannel"
+
 [[env.production.migrations]]
 tag = "v1"
 new_sqlite_classes = ["AppAgent"]
+
+[[env.production.migrations]]
+tag = "v2"
+new_sqlite_classes = ["RealtimeChannel"]
 
 # NOT inherited from the top-level env — redeclare the Workers AI binding for
 # production (named envs don't inherit bindings/vars/migrations).

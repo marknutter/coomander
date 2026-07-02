@@ -30,8 +30,11 @@ export async function createNotification(
   await db.insert(notifications).values({ id, userId, type, title, message });
   log.info("Notification created", { id, userId, type, title });
 
-  // Publish to SSE subscribers for instant delivery
-  publish(`notifications:${userId}`, {
+  // Publish to realtime subscribers for instant delivery. Awaited: a
+  // fire-and-forget promise left running after the response returns can be
+  // cancelled by the Workers runtime before the POST completes (see
+  // lib/realtime.ts's publish() doc comment).
+  await publish(`notifications:${userId}`, {
     type: "new-notification",
     notification: { id, userId, type, title, message, read: 0, createdAt: Math.floor(Date.now() / 1000) },
   });

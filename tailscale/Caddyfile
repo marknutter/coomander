@@ -32,6 +32,13 @@
 	# AppAgent Durable Object. Same-origin so the Better Auth cookie flows.
 	reverse_proxy /agents/* http://127.0.0.1:8788
 
+	# Generic RealtimeChannel DO (#222, ported from the AppSeed realtime epic) —
+	# same Worker/port as /agents/* above. lib/use-realtime.ts opens a same-
+	# origin WebSocket to /realtime/<channel> so the Better Auth cookie flows on
+	# the upgrade and the Worker gate can authenticate + authorize before any DO
+	# is touched.
+	reverse_proxy /realtime/* http://127.0.0.1:8788
+
 	# Everything else → next dev.
 	reverse_proxy http://127.0.0.1:3000
 }

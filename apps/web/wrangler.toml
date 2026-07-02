@@ -111,6 +111,17 @@ bucket_name = "coomander-storage"
 binding = "VIDEO_PROCESSOR"
 service = "coomander-video-processor"
 
+# ── Realtime channel fan-out (#222) ─────────────────────────────────────
+# Direct worker-to-worker call to the agents Worker's generic RealtimeChannel
+# DO (apps/agents/src/channel). REQUIRED in prod — see lib/realtime.ts's
+# publish() doc comment: a same-zone public fetch to coomander.com loops and
+# 522s, so publish() must go through this binding, never plain HTTP, once
+# deployed. `service` is the agents worker's `name` from
+# apps/agents/wrangler.toml (same script both in dev and `[env.production]`).
+[[services]]
+binding = "REALTIME"
+service = "coomander-agents"
+
 # ── Durable Object cleanup (prod outage fix, 2026-06-18) ───────────────
 # A prior out-of-band deploy registered an `AppAgent` Durable Object on THIS
 # (web) worker with no local class — AppAgent lives only in the coomander-agents
@@ -145,3 +156,15 @@ name = "coomander"
 # it for production. Powers the Telegram inbound classifier's Workers-AI path.
 [env.production.ai]
 binding = "AI"
+
+# Service bindings — NOT inherited from the top-level env, so redeclare for
+# production (see the [[durable_objects.bindings]]/[ai] precedent above and in
+# apps/agents/wrangler.toml: named envs never inherit bindings/vars/migrations).
+# REALTIME (#222) is the one this environment strictly needs at deploy time —
+# lib/realtime.ts's publish() requires the binding in prod (a public-URL fetch
+# to the same zone 522s). VIDEO_PROCESSOR is declared top-level only today
+# (pre-existing gap, not introduced by #222) — flagged here rather than
+# silently carried forward.
+[[env.production.services]]
+binding = "REALTIME"
+service = "coomander-agents"

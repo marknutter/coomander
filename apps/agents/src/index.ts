@@ -15,9 +15,26 @@ import { appendMessageInternal, hydrateMessages } from "./persistence";
 import type { AgentTool, ToolContext } from "./types";
 import { makeScheduleFollowupTool } from "./tools";
 import { deliverTelegramFallback } from "./web-api";
+import {
+  RealtimeChannel,
+  buildChannelPublishRequest,
+  parseChannel,
+  authorizeChannel,
+} from "./channel";
+
+// Register the generic per-entity realtime channel DO on the deployed script
+// (alongside AppAgent). The class lives in ./channel; re-exporting it here is
+// what makes the `RealtimeChannel` binding in wrangler.toml resolvable.
+export { RealtimeChannel } from "./channel";
 
 export type Env = {
   AppAgent: DurableObjectNamespace;
+  /**
+   * Generic realtime channel DO namespace. One instance per channel address
+   * (`idFromName("<type>:<id>")`); every socket on it receives every broadcast.
+   * Auth + channel authorization happen at the worker gate before forwarding.
+   */
+  REALTIME_CHANNEL: DurableObjectNamespace<RealtimeChannel>;
   /** Service binding to the web app Worker (prod only). */
   WEB?: Fetcher;
   /** Web app origin for session validation in dev (next dev on the shared netns). */
@@ -333,38 +350,76 @@ export class AppAgent extends Agent<Env, AppAgentState> {
   }
 
   /**
-   * Deliver a proactive message: push to any live WebSocket first; if none are
-   * connected, fall back to `onUndeliverable`. `conversationId` (when present)
-   * tells the client which thread the message was persisted into so it can
-   * render it in place. Returns how it was delivered.
+   * Deliver a proactive message by publishing to the user's realtime channel
+   * (`user:<userId>`), NOT this agent's own chat socket. The agent is a TENANT
+   * of the realtime layer (#222): proactive/scheduled delivery fans out through
+   * the generic RealtimeChannel DO (apps/agents/src/channel), while interactive
+   * chat streaming stays on this agent's `/agents/*` socket. The channel DO's
+   * `broadcast` returns how many sockets received the event; a count of 0 (no
+   * live subscriber) falls back to `onUndeliverable`. `conversationId` (when
+   * present) tells the client which thread the message was persisted into so
+   * it can render it in place. `this.name` is the gate-validated user id, and
+   * the channel's `authorizeChannel` lets a user subscribe to their own
+   * `user:` channel. Returns how it was delivered.
    */
   async deliverProactive(
     message: string,
     conversationId?: string,
   ): Promise<{ delivered: boolean; via: "ws" | "fallback" }> {
-    const hasConnection = [...this.getConnections()].length > 0;
-    if (hasConnection) {
-      this.broadcast(JSON.stringify({ type: "proactive", message, conversationId }));
-      return { delivered: true, via: "ws" };
-    }
+    const stub = this.env.REALTIME_CHANNEL.get(
+      this.env.REALTIME_CHANNEL.idFromName(`user:${this.name}`),
+    );
+    const res = await stub.fetch(
+      buildChannelPublishRequest({ type: "agent-message", message, conversationId }),
+    );
+    const { delivered } = (await res.json().catch(() => ({ delivered: 0 }))) as {
+      delivered?: number;
+    };
+    if ((delivered ?? 0) > 0) return { delivered: true, via: "ws" };
     await this.onUndeliverable(message);
     return { delivered: false, via: "fallback" };
   }
 
   /**
-   * Fallback when no socket is connected.
+   * Fallback when the realtime channel publish delivered to zero sockets (no
+   * live subscriber on `user:<userId>`).
    *
-   * ⚠️ COOMANDER DIVERGENCE from the AppSeed template (#192): the template
-   * persists an in-app notification (NotificationBell). Coomander's users live
-   * on Telegram — its cron pings and inbound classification already run over
-   * that channel — so an undeliverable proactive nudge is sent to Telegram via
-   * the internal `/api/internal/telegram-deliver` route (which uses the
-   * existing apps/web sendTelegram path). A user with no linked Telegram chat
-   * is a no-op on the web side; the reminder is still persisted to the thread.
+   * ⚠️ COOMANDER DIVERGENCE from the AppSeed template (#192, unchanged by
+   * #222): the template persists an in-app notification (NotificationBell).
+   * Coomander's users live on Telegram — its cron pings and inbound
+   * classification already run over that channel — so an undeliverable
+   * proactive nudge is sent to Telegram via the internal
+   * `/api/internal/telegram-deliver` route (which uses the existing apps/web
+   * sendTelegram path). A user with no linked Telegram chat is a no-op on the
+   * web side; the reminder is still persisted to the thread.
    */
   protected async onUndeliverable(message: string): Promise<void> {
     await deliverTelegramFallback(this.env, this.name, message);
   }
+}
+
+/**
+ * Constant-time string comparison for shared secrets, using only Web-standard
+ * APIs so it's safe regardless of the Worker's compat flags (no `node:crypto`
+ * dependency). A plain `a === b` short-circuits on the first differing byte,
+ * leaking how much of a guessed secret was correct via timing. We compare the
+ * UTF-8 bytes and XOR-accumulate over the full length so the work is constant
+ * for equal-length inputs; the length check fast-fails (length isn't secret).
+ */
+function timingSafeEqualStr(
+  a: string | null | undefined,
+  b: string | null | undefined,
+): boolean {
+  if (!a || !b) return false;
+  const enc = new TextEncoder();
+  const aBytes = enc.encode(a);
+  const bBytes = enc.encode(b);
+  if (aBytes.length !== bBytes.length) return false;
+  let diff = 0;
+  for (let i = 0; i < aBytes.length; i++) {
+    diff |= aBytes[i] ^ bBytes[i];
+  }
+  return diff === 0;
 }
 
 /** Binding name kebab-cased, per the Agents SDK routing convention. */
@@ -394,6 +449,39 @@ export default {
       return Response.json({ ok: true });
     }
 
+    // ── Internal publish trigger (server-to-server, NO user session) ───────
+    // Handled BEFORE the session gate — like /health — because this is a
+    // server-to-server seam (apps/web's publish() re-backing onto a realtime
+    // channel via the REALTIME service binding, #222), authenticated by the
+    // shared internal secret, not a user cookie. Body: { channel, event }.
+    // Returns { delivered: <count> }.
+    if (request.method === "POST" && url.pathname === "/realtime/internal/publish") {
+      const expected = env.AGENTS_INTERNAL_SECRET;
+      const provided = request.headers.get("x-agents-internal-secret");
+      if (!expected || !timingSafeEqualStr(provided, expected)) {
+        return Response.json({ error: "unauthorized" }, { status: 401 });
+      }
+      const body = (await request.json().catch(() => null)) as
+        | { channel?: unknown; event?: unknown }
+        | null;
+      const channel = typeof body?.channel === "string" ? body.channel : null;
+      if (!channel) {
+        return Response.json({ error: "channel required" }, { status: 400 });
+      }
+      const parsed = parseChannel(channel);
+      if (!parsed) {
+        return Response.json({ error: "invalid channel" }, { status: 400 });
+      }
+      const stub = env.REALTIME_CHANNEL.get(
+        env.REALTIME_CHANNEL.idFromName(parsed.raw),
+      );
+      const res = await stub.fetch(buildChannelPublishRequest(body?.event));
+      const { delivered } = (await res.json().catch(() => ({ delivered: 0 }))) as {
+        delivered?: number;
+      };
+      return Response.json({ delivered: delivered ?? 0 });
+    }
+
     let user: SessionUser | null;
     try {
       user = await validateSessionCookie(request.headers.get("cookie"), env);
@@ -408,6 +496,54 @@ export default {
       // Also covers WebSocket upgrades: a non-101 response refuses the
       // handshake cleanly before any DO is instantiated.
       return Response.json({ error: "unauthorized" }, { status: 401 });
+    }
+
+    // ── Generic realtime channel routing (/realtime/<type>:<id>) ───────────
+    // The session is already validated above (validate once). Now authorize
+    // the specific channel, then forward the upgrade to the channel DO. The DO
+    // never sees an unauthenticated/unauthorized request: a non-101 response
+    // here refuses the handshake before any DO is touched.
+    if (url.pathname.startsWith("/realtime/")) {
+      // The channel address is the (URL-decoded) segment after "/realtime/".
+      const channelSegment = decodeURIComponent(
+        url.pathname.slice("/realtime/".length),
+      );
+      const parsed = parseChannel(channelSegment);
+      if (!parsed) {
+        return Response.json({ error: "invalid channel" }, { status: 400 });
+      }
+
+      // Single authorization seam: deny channels the user doesn't own and any
+      // unknown channel type (see authorizeChannel). This rejects
+      // /realtime/user:<otherId> for a non-owner and any unknown type.
+      if (!authorizeChannel(parsed, user)) {
+        return Response.json({ error: "forbidden" }, { status: 403 });
+      }
+
+      // Only WebSocket upgrades are forwarded to the channel DO. A non-WS GET/
+      // POST to a user-facing /realtime/<channel> path isn't part of this
+      // surface (the publish trigger has its own pre-auth route above).
+      if (request.headers.get("upgrade") !== "websocket") {
+        return Response.json(
+          { error: "expected websocket upgrade" },
+          { status: 426 },
+        );
+      }
+
+      // Forward to the channel DO, passing ONLY gate-validated identity via
+      // internal headers (the DO trusts these, not client-supplied identity).
+      // The cookie flows through so the DO can revalidate the session later.
+      // Build a fresh Request so we can attach the internal headers while
+      // preserving the Upgrade header (the WebSocket constructor on `new
+      // Request(url, request)` carries the upgrade + webSocket through).
+      const headers = new Headers(request.headers);
+      headers.set("x-realtime-user", user.id);
+      headers.set("x-realtime-channel", parsed.raw);
+      const forwarded = new Request(request, { headers });
+      const stub = env.REALTIME_CHANNEL.get(
+        env.REALTIME_CHANNEL.idFromName(parsed.raw),
+      );
+      return stub.fetch(forwarded);
     }
 
     const rewritten = rewriteAgentPath(url, user.id);
