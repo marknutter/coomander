@@ -94,8 +94,12 @@ export interface ChatDeps {
   /** Worker-side tools (e.g. schedule_followup); Coomander domain tools are
    *  added per turn from the fetched agent context. */
   tools: AgentTool[];
-  /** Send a JSON frame back over the socket. */
-  send: (frame: ServerFrame) => void;
+  /**
+   * Send a JSON frame back over the socket. Returns false when the frame could
+   * NOT be delivered (socket closed/erroring mid-turn) so the loop can abandon
+   * the turn cleanly instead of throwing — see `safeSend` in index.ts.
+   */
+  send: (frame: ServerFrame) => boolean;
   /**
    * Working buffer of prior turns, hydrated lazily on cold start. Keyed by
    * conversationId ("coomander"). The AppAgent owns the Map so it survives
@@ -275,6 +279,36 @@ export async function handleChatTurn(deps: ChatDeps, frame: ClientFrame): Promis
   let assistantText = "";
   const usage: TurnUsage = { input_tokens: 0, output_tokens: 0 };
 
+  // Lets us stop the model stream (and stop billing) the instant the client
+  // socket drops mid-turn — see the send-returns-false bail below — or when
+  // the stream goes silent for too long (inactivity watchdog below).
+  const abortController = new AbortController();
+  // True only when we aborted because the socket is already gone (send()
+  // returned false) — the catch block then knows not to bother sending an
+  // error frame, since there's no live socket to receive it.
+  let closedMidStream = false;
+
+  // Reset on every token; fires if the model stream goes silent for this long
+  // (a stalled/misbehaving provider, or a tool call that never resolves) so a
+  // turn can never hang the client's spinner forever.
+  const STREAM_INACTIVITY_TIMEOUT_MS = 30_000;
+  let watchdog: ReturnType<typeof setTimeout> | null = null;
+  const clearWatchdog = () => {
+    if (watchdog) {
+      clearTimeout(watchdog);
+      watchdog = null;
+    }
+  };
+  const armWatchdog = () => {
+    clearWatchdog();
+    watchdog = setTimeout(() => {
+      console.warn(
+        `[AppAgent ${userId}] model stream stalled — no token within ${STREAM_INACTIVITY_TIMEOUT_MS}ms; aborting turn`,
+      );
+      abortController.abort();
+    }, STREAM_INACTIVITY_TIMEOUT_MS);
+  };
+
   // Cache the (large, live-data) system prompt — mirror of coomanderChat's
   // cache_control usage. The Anthropic provider reads cache_control from the
   // SYSTEM MESSAGE's providerOptions, so for Claude we pass the prompt as a
@@ -294,6 +328,7 @@ export async function handleChatTurn(deps: ChatDeps, frame: ClientFrame): Promis
       system,
       messages,
       maxOutputTokens: context.maxTokens,
+      abortSignal: abortController.signal,
       ...(Object.keys(aiTools).length > 0
         ? { tools: aiTools, stopWhen: stepCountIs(MAX_TOOL_ITERATIONS) }
         : {}),
@@ -304,10 +339,24 @@ export async function handleChatTurn(deps: ChatDeps, frame: ClientFrame): Promis
     // error) per the AI SDK contract, so the try/catch routes it to an error
     // frame instead of silently ending an empty stream. Stream deltas straight
     // to the client as they arrive AND accumulate the full text.
+    armWatchdog();
     for await (const text of result.textStream) {
+      // A chunk arrived — the model/stream is alive; reset the stall clock.
+      armWatchdog();
       assistantText += text;
-      send({ type: "token", text });
+      // `send` returns false (never throws) when the socket closed mid-stream
+      // (safeSend). Abort the model stream and abandon the turn: there's no
+      // open socket to receive a token/done/error frame, and pulling more
+      // tokens just burns the model budget for nothing.
+      if (!send({ type: "token", text })) {
+        clearWatchdog();
+        closedMidStream = true;
+        abortController.abort();
+        console.warn(`[AppAgent ${userId}] client socket closed mid-stream — aborting turn`);
+        return;
+      }
     }
+    clearWatchdog();
 
     // ── Map AI SDK usage → Coomander's TurnUsage ────────────────────────────
     // A tool-use turn makes MULTIPLE model calls (one per step). `result.usage`
@@ -335,6 +384,17 @@ export async function handleChatTurn(deps: ChatDeps, frame: ClientFrame): Promis
       }
     }
   } catch (err) {
+    clearWatchdog();
+    // The socket-close bail above already handled this abort — no live socket
+    // to send an error frame to, so stay silent.
+    if (closedMidStream) return;
+    if (abortController.signal.aborted) {
+      // The inactivity watchdog fired — the socket may still be open, so tell
+      // the client rather than leaving the spinner hanging forever.
+      console.error(`[AppAgent ${userId}] model stream stalled — aborting turn`);
+      send({ type: "error", message: "The assistant stopped responding. Please try again." });
+      return;
+    }
     console.error(`[AppAgent ${userId}] model stream error`, err);
     send({ type: "error", message: "Something went wrong. Please try again." });
     return;
