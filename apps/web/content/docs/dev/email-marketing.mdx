@@ -17,12 +17,17 @@ This ports AppSeed's "basic Mailchimp parity" epic (#595 upstream:
 audiences/tags #596, batched send #454, scheduled send #597) plus its
 hardening follow-up, onto Coomander (sync #222).
 
-> **Realtime is NOT included.** Unlike AppSeed's current version, Coomander's
-> campaign-send engine has no live-progress publish() calls yet — the admin
-> campaign detail page polls every 4s while a send is in flight instead of
-> subscribing to a push channel. A separate realtime sync slice grafts
-> `publishCampaignState`-style live updates on later; the batch-boundary seams
-> in `lib/campaign-send.ts` are deliberately left clean for that.
+> **Realtime progress is live.** The admin campaign detail page subscribes to
+> the per-campaign `campaign:<id>` realtime channel (admin-only — see the
+> Realtime dev wiki page, `content/docs/dev/realtime.mdx`) instead of polling.
+> `lib/campaign-realtime.ts`
+> publishes a `campaign-progress` event at every batch-boundary seam in
+> `lib/campaign-send.ts` (sending baseline, per completed batch, finalize,
+> empty audience, resend, dead-letter/reconciler) and a `campaign-opened` event
+> from the open-tracking pixel route. Best-effort and non-throwing throughout —
+> a broken realtime hop degrades to "the page shows the last-fetched state
+> until refreshed," never to a failed/dropped send. The D1 row on
+> `email_campaigns` stays the single source of truth.
 
 ## Data model
 

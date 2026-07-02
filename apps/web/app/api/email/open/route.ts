@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { getDb } from "@/lib/db";
 import { emailEvents } from "@/lib/schema";
 import { verifyTrackingToken, TRANSPARENT_GIF } from "@/lib/email-tracking";
+import { publishCampaignOpened } from "@/lib/campaign-realtime";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -28,6 +30,17 @@ export async function GET(req: NextRequest) {
           event_type: "opened",
         })
         .run();
+
+      // Fan out a live "opened" nudge to the campaign channel so an admin
+      // watching the detail page sees opens tick up (#222). Best-effort: hand
+      // it to waitUntil so the pixel response isn't delayed by the realtime hop
+      // (fall back to await when there's no CF exec context, e.g. next dev).
+      const pub = publishCampaignOpened(ctx.campaignId, ctx.email);
+      try {
+        getCloudflareContext().ctx.waitUntil(pub);
+      } catch {
+        await pub;
+      }
     } catch (err) {
       console.error("[email/open] failed to log open event:", err);
     }
