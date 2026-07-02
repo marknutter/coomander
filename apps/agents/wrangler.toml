@@ -42,9 +42,20 @@ binding = "AI"
 name = "AppAgent"
 class_name = "AppAgent"
 
+# Generic per-entity realtime fan-out channel (#222, ported from the AppSeed
+# realtime epic). One DO instance per "<type>:<id>" channel address; any
+# feature can publish to it without owning DO code. See src/channel/.
+[[durable_objects.bindings]]
+name = "REALTIME_CHANNEL"
+class_name = "RealtimeChannel"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["AppAgent"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["RealtimeChannel"]
 
 # ── Production (`wrangler deploy --env production`) ───────────────────────────
 # Daily dev uses the top-level env above (`wrangler dev` — no route, no service
@@ -95,9 +106,17 @@ service = "coomander"
 name = "AppAgent"
 class_name = "AppAgent"
 
+[[env.production.durable_objects.bindings]]
+name = "REALTIME_CHANNEL"
+class_name = "RealtimeChannel"
+
 [[env.production.migrations]]
 tag = "v1"
 new_sqlite_classes = ["AppAgent"]
+
+[[env.production.migrations]]
+tag = "v2"
+new_sqlite_classes = ["RealtimeChannel"]
 
 # NOT inherited from the top-level env — redeclare the Workers AI binding for
 # production (named envs don't inherit bindings/vars/migrations).
