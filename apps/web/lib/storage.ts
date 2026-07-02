@@ -285,10 +285,17 @@ export function getFileUrl(key: string): string {
 /**
  * Count stored objects under a key prefix. Used to enforce a per-user/day quota
  * on AI-generated images (#222 follow-up) at the storage choke point. Best-effort:
- *   - R2 binding: `list({ prefix })` (capped page is fine for a small quota).
+ *   - R2 binding (prod): `list({ prefix })` (a single capped page is plenty for a
+ *     small per-day quota).
+ *   - S3-compatible: `GET /{bucket}?list-type=2&prefix=…` (V2-signed, same scheme
+ *     as upload/download below), counting returned keys.
  *   - Local fs (dev): count files in the prefix directory.
- *   - S3 / unknown: returns 0 (no list wired) — the soft worker-side cap still
- *     applies; document if you deploy on S3 and need a hard ceiling.
+ *
+ * NOTE (known limitation): this read is not atomic with the subsequent upload in
+ * the callers, so highly-concurrent requests can momentarily overshoot the cap.
+ * The quota is a soft cost/abuse control, not a security boundary — an exact,
+ * race-free ceiling would need a per-user atomic DB counter, which is out of scope
+ * for this control. See PR #223 review (finding #2).
  */
 export async function countStoredUnder(prefix: string): Promise<number> {
   if (isD1()) {
@@ -301,15 +308,54 @@ export async function countStoredUnder(prefix: string): Promise<number> {
     }
     return 0;
   }
-  if (!isD1()) {
-    try {
-      const dir = path.join(UPLOADS_DIR, prefix);
-      return fs.existsSync(dir) ? fs.readdirSync(dir).length : 0;
-    } catch {
-      return 0;
-    }
+  // Non-D1: prefer a real S3 list when S3 is configured (otherwise the quota
+  // would silently no-op on S3 deploys — the local-fs branch counts nothing).
+  const s3Count = await countS3Under(prefix);
+  if (s3Count !== null) return s3Count;
+  try {
+    const dir = path.join(UPLOADS_DIR, prefix);
+    return fs.existsSync(dir) ? fs.readdirSync(dir).length : 0;
+  } catch {
+    return 0;
   }
-  return 0;
+}
+
+/**
+ * Count objects under a prefix on the S3-compatible backend via ListObjectsV2.
+ * Returns null when S3 is not configured (so the caller falls back to local fs).
+ * V2-signed to match `getS3Backend()`. Best-effort — returns 0 on any list error
+ * rather than throwing (the caller is a quota gate, not a data path).
+ */
+async function countS3Under(prefix: string): Promise<number | null> {
+  const endpoint = process.env.S3_ENDPOINT;
+  const bucket = process.env.S3_BUCKET;
+  const accessKey = process.env.S3_ACCESS_KEY;
+  const secretKey = process.env.S3_SECRET_KEY;
+  if (!endpoint || !bucket || !accessKey || !secretKey) return null;
+
+  try {
+    const date = new Date().toUTCString();
+    // Query params (list-type, prefix, max-keys) are not part of the V2 canonical
+    // resource — the bucket itself is. MaxKeys is capped just above the quota.
+    const stringToSign = `GET\n\n\n${date}\n/${bucket}/`;
+    const signature = crypto
+      .createHmac("sha1", secretKey)
+      .update(stringToSign)
+      .digest("base64");
+
+    const url =
+      `${endpoint}/${bucket}?list-type=2` +
+      `&prefix=${encodeURIComponent(prefix)}&max-keys=1000`;
+    const res = await fetch(url, {
+      headers: { Date: date, Authorization: `AWS ${accessKey}:${signature}` },
+    });
+    if (!res.ok) return 0;
+    const xml = await res.text();
+    const matches = xml.match(/<Key>/g);
+    return matches ? matches.length : 0;
+  } catch {
+    return 0;
+  }
 }
 
 /**

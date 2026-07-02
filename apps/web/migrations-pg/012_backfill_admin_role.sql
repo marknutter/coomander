@@ -1,0 +1,14 @@
+-- Unconditional admin-role backfill (PR #223 review, finding #3).
+--
+-- Migration 006 backfilled role='admin' for isAdmin=1 users, but guarded on
+-- the isAdmin column already existing. On any PostgreSQL database that applied
+-- 006 in a release BEFORE this sync introduced 001_add_admin.sql (which is what
+-- actually adds isAdmin to PG), that guard found no isAdmin column and silently
+-- skipped the backfill — and migrations are applied-once (tracked by filename in
+-- `_migrations`), so 006 never re-runs. Result on such a DB: an admin ends up
+-- with isAdmin=1 but role='user', so Better Auth's admin() plugin (which now
+-- gates on role) doesn't recognize them. Fail-closed, but a real correctness bug.
+--
+-- This migration re-runs the sync unconditionally. By 012 both isAdmin and role
+-- exist (001 + 006 have run), so this is always safe and idempotent.
+UPDATE "user" SET role = 'admin' WHERE "isAdmin" = 1 AND role IS DISTINCT FROM 'admin';
