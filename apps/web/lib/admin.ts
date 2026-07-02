@@ -4,6 +4,7 @@ import { auth } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { user, planOverrides, adminLogs } from "@/lib/schema";
 import { queryFirst, executeChanges } from "@/lib/db-helpers";
+import { isPg } from "@/lib/db-dialect";
 
 export interface AdminSession {
   user: { id: string; email: string };
@@ -53,6 +54,10 @@ export async function logAdminAction(
 
 export async function getEffectivePlan(userId: string): Promise<{ plan: string; override: boolean; expiresAt: string | null }> {
   const db = getDb();
+  // `expires_at` is a text timestamp. The "still active" comparison needs the
+  // current time in dialect-correct SQL: SQLite has no now(), Postgres has no
+  // datetime(). Both produce a lexicographically-comparable ISO-ish string.
+  const nowSql = isPg() ? sql`now()` : sql`datetime('now')`;
   const row = await queryFirst(
     db
       .select({
@@ -63,7 +68,7 @@ export async function getEffectivePlan(userId: string): Promise<{ plan: string; 
       .from(user)
       .leftJoin(
         planOverrides,
-        sql`${planOverrides.user_id} = ${user.id} AND (${planOverrides.expires_at} IS NULL OR ${planOverrides.expires_at} > datetime('now'))`,
+        sql`${planOverrides.user_id} = ${user.id} AND (${planOverrides.expires_at} IS NULL OR ${planOverrides.expires_at} > ${nowSql})`,
       )
       .where(eq(user.id, userId))
   );
