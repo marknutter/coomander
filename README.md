@@ -155,6 +155,8 @@ Then open the app (localhost:3005 or the tailnet URL), go to the home/onboarding
 | `COOMANDER_BOT_USERNAME` | No | @username (no @) for the Connect-Telegram deep link; defaults to `coomander_bot`. Set to your dev bot's username in local dev. |
 | `TELEGRAM_WEBHOOK_URL` | Local Telegram dev | Public webhook URL used by `npm run telegram:webhook -- set` (your Cloudflare Tunnel host + `/api/coomander/webhook`). |
 | `CLOUDFLARE_TUNNEL_TOKEN` | Local Telegram dev | Token for the `cloudflared` sidecar; goes in the repo-root `.env`. See "Local Telegram dev". |
+| `CAMPAIGN_BATCH_SIZE` | No | Recipients per email-campaign send batch (queue message / job); defaults to `50`. See [Email Marketing (Campaigns)](/docs/dev/email-marketing). |
+| `STUCK_CAMPAIGN_MINUTES` | No | Minutes a campaign can sit in `sending` with no progress before the reconciler marks it `failed`; defaults to `60`. |
 
 Local: put these in `node/.env.local` (gitignored). Production: `npx wrangler secret put VAR_NAME`.
 
@@ -200,6 +202,7 @@ npm run deploy:cf
 | New non-secret env var | Edit `wrangler.toml [vars]`, then deploy |
 | New D1/R2/KV binding | Edit `wrangler.toml`, deploy |
 | Promote a user to admin | `npx wrangler d1 execute coomander-db --remote --command "UPDATE user SET isAdmin = 1 WHERE email = 'you@example.com'"` |
+| First deploy after this doc — campaign send queue | `wrangler queues create coomander-campaign-send` (see [Email Marketing (Campaigns)](/docs/dev/email-marketing)) |
 
 ### Sanity checks
 

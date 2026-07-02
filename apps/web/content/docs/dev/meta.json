@@ -12,6 +12,8 @@
     "ai-models",
     "---Realtime---",
     "realtime",
+    "---Email---",
+    "email-marketing",
     "---Deployment---",
     "cloudflare-workers-compat"
   ]
