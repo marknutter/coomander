@@ -97,6 +97,11 @@ function CoomanderChat() {
   const setAgentHandle = useCallback((h: AgentChatHandle | null) => {
     agentHandleRef.current = h;
   }, []);
+  // Socket lifecycle: drive a connecting/reconnecting indicator and gate
+  // sending until the socket is actually open (composing stays available).
+  const [socketStatus, setSocketStatus] = useState<"connecting" | "open" | "closed">("connecting");
+  // Whether the socket has ever opened — picks "Connecting…" vs "Reconnecting…".
+  const hasConnectedRef = useRef(false);
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -216,6 +221,10 @@ function CoomanderChat() {
       // useRealtime("user:<id>") subscription + handleAgentMessage above, not
       // this WS callback object (#222) — see lib/use-agent-chat.ts.
       onStatusChange: (status) => {
+        setSocketStatus(status);
+        if (status === "open") {
+          hasConnectedRef.current = true;
+        }
         // A mid-turn disconnect would otherwise leave the spinner forever.
         if (status === "closed" && wsTurnRef.current) {
           wsTurnRef.current = false;
@@ -435,6 +444,11 @@ function CoomanderChat() {
 
   // ── The chat ─────────────────────────────────────────────────────────────────
   const isDisabled = sending || voiceState === "listening" || voiceState === "speaking";
+  // Sending is additionally gated on an open socket — the textarea stays
+  // editable while connecting so the user can compose; only the send fires
+  // once the socket is ready. `handleSend` still awaits readiness internally
+  // (~8s poll) as a second line of defense against a race at the boundary.
+  const socketReady = socketStatus === "open";
 
   return (
     <div className="flex flex-col h-[calc(100dvh-3.5rem)]">
@@ -528,8 +542,15 @@ function CoomanderChat() {
 
       {/* Composer */}
       <div className="border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-4 py-3">
+        {/* Persistent connecting/reconnecting indicator */}
+        {!socketReady && (
+          <div className="max-w-2xl mx-auto mb-2 flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400" role="status">
+            <Loader2 className="w-3 h-3 animate-spin" />
+            {hasConnectedRef.current ? "Reconnecting to Coomander…" : "Connecting to Coomander…"}
+          </div>
+        )}
         <form
-          onSubmit={(e) => { e.preventDefault(); void handleSend(); }}
+          onSubmit={(e) => { e.preventDefault(); if (socketReady) void handleSend(); }}
           className="max-w-2xl mx-auto flex items-end gap-2"
         >
           {isVoiceSupported && (
@@ -552,7 +573,7 @@ function CoomanderChat() {
             ref={textareaRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void handleSend(); } }}
+            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (socketReady) void handleSend(); } }}
             placeholder={voiceState === "listening" ? "Listening…" : "Message Coomander…"}
             disabled={isDisabled}
             rows={1}
@@ -561,7 +582,7 @@ function CoomanderChat() {
 
           <button
             type="submit"
-            disabled={isDisabled || !input.trim()}
+            disabled={isDisabled || !socketReady || !input.trim()}
             className="p-2 text-white bg-primary hover:bg-primary/90 rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             title="Send"
           >
